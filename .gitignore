@@ -1,0 +1,10 @@
+/target
+Cargo.lock.bak
+.env
+.envrc
+.idea/
+.vscode/
+.bin/
+
+# Exported from buf.build/agntcy/dir by `task proto:export`; shipped in the published crate
+/proto/

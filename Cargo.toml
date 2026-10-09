@@ -1,0 +1,48 @@
+[package]
+name = "agntcy-dir"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.78"
+description = "Rust SDK for the AGNTCY Directory"
+license = "Apache-2.0"
+homepage = "https://github.com/agntcy/dir-sdk-rust"
+repository = "https://github.com/agntcy/dir-sdk-rust"
+keywords = ["sdk", "client", "directory", "agntcy", "grpc"]
+# `proto/` is git-ignored (exported from the BSR by `task proto:export`) but
+# must ship in the crate so `build.rs` can generate the stubs on docs.rs / users' machines.
+include = ["/src", "/proto", "/build.rs", "/examples", "/tests", "/README.md", "/LICENSE", "/Cargo.toml"]
+
+[dependencies]
+tonic = { version = "0.12", features = ["tls", "tls-roots"] }
+prost = "0.13"
+prost-types = "0.13"
+pbjson = "0.7"
+pbjson-types = "0.7"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "process", "time", "fs", "io-util", "sync"] }
+tokio-stream = "0.1"
+tower = { version = "0.5", features = ["util"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+url = "2"
+sha2 = "0.10"
+base64 = "0.22"
+rand = "0.8"
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
+dirs = "5"
+open = "5"
+tempfile = "3"
+
+[build-dependencies]
+tonic-build = "0.12"
+prost = "0.13"
+prost-types = "0.13"
+protox = "0.7"
+pbjson-build = "0.7"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }
+tempfile = "3"
