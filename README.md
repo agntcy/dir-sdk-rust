@@ -1,5 +1,7 @@
 # AGNTCY Directory Rust SDK
 
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/agntcy/dir-sdk-rust/badge)](https://scorecard.dev/viewer/?uri=github.com/agntcy/dir-sdk-rust)
+
 Rust client for the [AGNTCY Directory](https://github.com/agntcy/dir), feature-equivalent to
 [`dir-sdk-javascript`](../dir-sdk-javascript) and [`dir-sdk-python`](../dir-sdk-python).
 
