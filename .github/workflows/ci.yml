@@ -7,9 +7,28 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      dir_chart_version:
+        required: false
+        type: string
+        description: "Override the version of the dir Helm chart to install for the tests."
+      dirctl_image_tag:
+        required: false
+        type: string
+        description: "Override the tag of the dir-ctl Docker image to use in the tests."
+
+# Declare default permissions as read-only; jobs that need more request it explicitly.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  test:
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,11 +39,30 @@ jobs:
       - uses: bufbuild/buf-setup-action@v1
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: arduino/setup-task@v2
-        with:
-          version: 3.x
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
       - run: task proto:export
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
+
+  test:
+    name: Test
+    permissions:
+      id-token: write
+      contents: read
+      packages: read
+    uses: ./.github/workflows/reusable-test-sdk.yaml
+    with:
+      dir_chart_version: ${{ inputs.dir_chart_version }}
+      dirctl_image_tag: ${{ inputs.dirctl_image_tag }}
+
+  success:
+    name: Success
+    if: ${{ !cancelled() && !contains(needs.*.result, 'cancelled') && !contains(needs.*.result, 'failure') }}
+    needs:
+      - lint
+      - test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Echo Success
+        run: echo "::notice Success! All checks passed."
