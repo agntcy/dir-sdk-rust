@@ -1,6 +1,8 @@
 // Copyright AGNTCY Contributors (https://github.com/agntcy)
 // SPDX-License-Identifier: Apache-2.0
 
+use std::path::Path;
+
 use super::runner::{run_dirctl, DirctlOutput};
 use crate::client::config::Config;
 use crate::error::{Error, Result};
@@ -22,8 +24,18 @@ pub async fn sign_with_key(config: &Config, cid: &str, req: &sign_v1::SignWithKe
     let mut env = server_env(config);
     env.push(("COSIGN_PASSWORD".into(), password.into_owned()));
 
-    let args = ["sign", cid, "--key", &req.private_key].map(String::from);
-    run_dirctl(config, &args, &env, &[]).await
+    // Inside docker the key file is bind-mounted (read-only) at the container root.
+    let (key_arg, mounts) = match (&config.docker_config, Path::new(&req.private_key).file_name()) {
+        (Some(_), Some(name)) if Path::new(&req.private_key).is_file() => {
+            let dst = format!("/{}", name.to_string_lossy());
+            let mount = format!("type=bind,src={},dst={dst},readonly", req.private_key);
+            (dst, vec![mount])
+        }
+        _ => (req.private_key.clone(), vec![]),
+    };
+
+    let args = ["sign", cid, "--key", &key_arg].map(String::from);
+    run_dirctl(config, &args, &env, &mounts).await
 }
 
 /// Signs `cid` using keyless OIDC (`dirctl sign <cid> [--oidc-token ...]`).
