@@ -1,0 +1,90 @@
+# Copyright AGNTCY Contributors (https://github.com/agntcy)
+# SPDX-License-Identifier: Apache-2.0
+
+name: Test SDK
+
+on:
+  workflow_call:
+    inputs:
+      dir_chart_version:
+        required: false
+        type: string
+        description: "The version of the dir Helm chart to install for the tests."
+      dirctl_image_tag:
+        required: false
+        type: string
+        description: "The tag of the dir-ctl Docker image to use in the tests."
+      sdk_ref:
+        required: false
+        type: string
+        description: "Git ref (branch, tag, or SHA) of agntcy/dir-sdk-rust to test. When omitted, resolved automatically."
+
+permissions:
+  id-token: write
+  contents: read
+  packages: read
+
+jobs:
+  rust:
+    name: Rust
+    runs-on: ubuntu-latest
+    steps:
+      # Cross-repo callers (e.g. agntcy/csit) need GITHUB_TOKEN with contents:read on this repo.
+      - name: Resolve SDK ref
+        id: sdk-ref
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${{ inputs.sdk_ref }}" ]; then
+            ref="${{ inputs.sdk_ref }}"
+          elif [ "${{ github.repository }}" = "agntcy/dir-sdk-rust" ]; then
+            ref="${{ github.sha }}"
+          else
+            ref="main"
+          fi
+          echo "ref=${ref}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: agntcy/dir-sdk-rust
+          ref: ${{ steps.sdk-ref.outputs.ref }}
+          fetch-depth: 0
+
+      - name: Login to ghcr.io
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: notused
+          password: ${{ secrets.GITHUB_TOKEN  }}
+
+      - name: Install Task
+        uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
+
+      - name: Setup Go (for kind)
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Setup buf
+        uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add dependencies for SDKs testing
+        env:
+          CLIENT_ID: "https://github.com/agntcy/dir-sdk-rust/.github/workflows/reusable-test-sdk.yaml@${{ steps.sdk-ref.outputs.ref }}"
+        run: |
+          task deps:cicd:iodc-token-generation >> $GITHUB_ENV
+
+      - name: Test Rust SDK
+        env:
+          DIR_CHART_VERSION: ${{ inputs.dir_chart_version }}
+          DIRCTL_IMAGE_TAG: ${{ inputs.dirctl_image_tag }}
+        run: task test
