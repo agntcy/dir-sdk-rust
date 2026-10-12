@@ -36,7 +36,7 @@ vars:
 
   # Pinned commit of the Directory API on the Buf Schema Registry. Bump to pick up API changes.
   BUF_MODULE: "buf.build/agntcy/dir"
-  BUF_COMMIT: "9625cc57c64340fa9b1c5e95b24049f3"
+  BUF_COMMIT: "ad29ba5021f244289d2916bbca4cd7e8"
   API_HOSTPORT: '{{ .API_HOSTPORT | default "8888" }}'
 
 tasks:

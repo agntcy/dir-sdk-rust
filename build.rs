@@ -12,7 +12,7 @@ use prost::Message;
 const PROTOS: &[&str] = &[
     "agntcy/dir/core/v1/record.proto",
     "agntcy/dir/events/v1/event_service.proto",
-    "agntcy/dir/identity/v1/identity_service.proto",
+    "agntcy/dir/naming/v1/naming_service.proto",
     "agntcy/dir/routing/v1/routing_service.proto",
     "agntcy/dir/routing/v1/publication_service.proto",
     "agntcy/dir/search/v1/search_service.proto",

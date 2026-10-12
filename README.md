@@ -6,7 +6,7 @@ Rust client for the [AGNTCY Directory](https://github.com/agntcy/dir), feature-e
 [`dir-sdk-javascript`](../dir-sdk-javascript) and [`dir-sdk-python`](../dir-sdk-python).
 
 - async (`tokio`) gRPC client on `tonic`/`prost`, with protobuf‑JSON `serde` support on every message
-- every Directory service: store, routing, publication, search, sign/verify, sync, events, identity
+- every Directory service: store, routing, publication, search, sign/verify, sync, events, naming
 - auth modes: insecure, `tls` (mTLS files), `x509` / `jwt` (SPIFFE Workload API), `oidc` (bearer token + interactive PKCE login with `dirctl`-compatible token cache)
 - signing and local verification through the `dirctl` CLI (native binary or Docker)
 - no `protoc` needed: stubs are generated at build time from the vendored `proto/` tree with the pure-Rust `protox`
