@@ -34,9 +34,9 @@ vars:
 
   KIND_CLUSTER_NAME: "sdk-rust-test"
 
-  # Pinned commit of the Directory API on the Buf Schema Registry. Bump to pick up API changes.
+  # Pinned release tag of the Directory API on the Buf Schema Registry. Bump to pick up API changes.
   BUF_MODULE: "buf.build/agntcy/dir"
-  BUF_COMMIT: "ad29ba5021f244289d2916bbca4cd7e8"
+  BUF_TAG: "v1.7.0"
   API_HOSTPORT: '{{ .API_HOSTPORT | default "8888" }}'
 
 tasks:
@@ -68,10 +68,10 @@ tasks:
         msg: "buf CLI is required (https://buf.build/docs/installation) and must be logged in (`buf registry login`)"
     cmds:
       - rm -rf proto
-      - buf export {{ .BUF_MODULE }}:{{ .BUF_COMMIT }} -o proto
-      - echo "{{ .BUF_MODULE }}:{{ .BUF_COMMIT }}" > proto/.buf-ref
+      - buf export {{ .BUF_MODULE }}:{{ .BUF_TAG }} -o proto
+      - echo "{{ .BUF_MODULE }}:{{ .BUF_TAG }}" > proto/.buf-ref
     status:
-      - test "$(cat proto/.buf-ref 2>/dev/null)" = "{{ .BUF_MODULE }}:{{ .BUF_COMMIT }}"
+      - test "$(cat proto/.buf-ref 2>/dev/null)" = "{{ .BUF_MODULE }}:{{ .BUF_TAG }}"
 
   package:
     desc: Verify the crate packages (and builds) from the exported protos

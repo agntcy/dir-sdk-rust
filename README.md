@@ -94,7 +94,7 @@ DIRECTORY_CLIENT_SERVER_ADDRESS=localhost:8888 \
   cargo test --test client -- --ignored      # against a live Directory
 ```
 
-The API protos are not committed: `task proto:export` runs `buf export` of the pinned `buf.build/agntcy/dir` commit (see `BUF_COMMIT` in the Taskfile) into `proto/`, which `build.rs` compiles. They are shipped inside the published crate, so crates.io users need neither `buf` nor a BSR token. Requires the `buf` CLI (logged in). To pick up API changes, bump `BUF_COMMIT`.
+The API protos are not committed: `task proto:export` runs `buf export` of the pinned `buf.build/agntcy/dir` release tag (see `BUF_TAG` in the Taskfile) into `proto/`, which `build.rs` compiles. They are shipped inside the published crate, so crates.io users need neither `buf` nor a BSR token. Requires the `buf` CLI (logged in). To pick up API changes, bump `BUF_TAG` to the matching Directory release.
 
 ## License
 
