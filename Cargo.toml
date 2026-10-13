@@ -13,7 +13,7 @@ keywords = ["sdk", "client", "directory", "agntcy", "grpc"]
 include = ["/src", "/proto", "/build.rs", "/examples", "/tests", "/README.md", "/LICENSE", "/Cargo.toml"]
 
 [dependencies]
-tonic = { version = "0.12", features = ["tls", "tls-roots"] }
+tonic = { version = "0.13", features = ["tls-ring", "tls-native-roots"] }
 prost = "0.13"
 prost-types = "0.13"
 pbjson = "0.7"
@@ -37,7 +37,7 @@ open = "5"
 tempfile = "3"
 
 [build-dependencies]
-tonic-build = "0.12"
+tonic-build = "0.13"
 prost = "0.13"
 prost-types = "0.13"
 protox = "0.7"

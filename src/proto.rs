@@ -25,9 +25,9 @@ pub mod agntcy {
                 package!("agntcy.dir.events.v1");
             }
         }
-        pub mod identity {
+        pub mod naming {
             pub mod v1 {
-                package!("agntcy.dir.identity.v1");
+                package!("agntcy.dir.naming.v1");
             }
         }
         pub mod routing {

@@ -17,13 +17,12 @@
 use std::time::Duration;
 
 use agntcy_dir::models::core_v1::{Record, RecordRef};
-use agntcy_dir::models::identity::GetVerificationInfoRequest;
 use agntcy_dir::models::sign_v1::{self, signer_info, SignerInfo};
 use agntcy_dir::models::store_v1::{
     CreateSyncRequest, DeleteReferrerRequest, DeleteSyncRequest, GetSyncRequest, ListSyncsRequest, PullReferrerRequest,
     PushReferrerRequest,
 };
-use agntcy_dir::models::{events_v1, identity_v1, routing_v1, search_v1};
+use agntcy_dir::models::{events_v1, naming_v1, routing_v1, search_v1};
 use agntcy_dir::{Client, Config};
 use rand::Rng;
 use serde_json::json;
@@ -515,7 +514,7 @@ async fn resolve() {
     let refs = c.push(records).await.unwrap();
 
     let by_name = c
-        .resolve(identity_v1::ResolveRequest {
+        .resolve(naming_v1::ResolveRequest {
             name: name.clone(),
             version: None,
         })
@@ -527,7 +526,7 @@ async fn resolve() {
     assert_eq!(by_name.records[0].version, version);
 
     let by_version = c
-        .resolve(identity_v1::ResolveRequest {
+        .resolve(naming_v1::ResolveRequest {
             name,
             version: Some(version),
         })
@@ -545,7 +544,7 @@ async fn get_verification_info() {
 
     // unsigned record: unverified, with an explanation
     let info = c
-        .get_verification_info(GetVerificationInfoRequest {
+        .get_verification_info(naming_v1::GetVerificationInfoRequest {
             cid: Some(refs[0].cid.clone()),
             ..Default::default()
         })

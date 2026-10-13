@@ -6,7 +6,7 @@ Rust client for the [AGNTCY Directory](https://github.com/agntcy/dir), feature-e
 [`dir-sdk-javascript`](../dir-sdk-javascript) and [`dir-sdk-python`](../dir-sdk-python).
 
 - async (`tokio`) gRPC client on `tonic`/`prost`, with protobuf‑JSON `serde` support on every message
-- every Directory service: store, routing, publication, search, sign/verify, sync, events, identity
+- every Directory service: store, routing, publication, search, sign/verify, sync, events, naming
 - auth modes: insecure, `tls` (mTLS files), `x509` / `jwt` (SPIFFE Workload API), `oidc` (bearer token + interactive PKCE login with `dirctl`-compatible token cache)
 - signing and local verification through the `dirctl` CLI (native binary or Docker)
 - no `protoc` needed: stubs are generated at build time from the vendored `proto/` tree with the pure-Rust `protox`
@@ -94,7 +94,7 @@ DIRECTORY_CLIENT_SERVER_ADDRESS=localhost:8888 \
   cargo test --test client -- --ignored      # against a live Directory
 ```
 
-The API protos are not committed: `task proto:export` runs `buf export` of the pinned `buf.build/agntcy/dir` commit (see `BUF_COMMIT` in the Taskfile) into `proto/`, which `build.rs` compiles. They are shipped inside the published crate, so crates.io users need neither `buf` nor a BSR token. Requires the `buf` CLI (logged in). To pick up API changes, bump `BUF_COMMIT`.
+The API protos are not committed: `task proto:export` runs `buf export` of the pinned `buf.build/agntcy/dir` release tag (see `BUF_TAG` in the Taskfile) into `proto/`, which `build.rs` compiles. They are shipped inside the published crate, so crates.io users need neither `buf` nor a BSR token. Requires the `buf` CLI (logged in). To pick up API changes, bump `BUF_TAG` to the matching Directory release.
 
 ## License
 

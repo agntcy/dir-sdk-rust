@@ -1,0 +1,33 @@
+# Release
+
+This document outlines the process of creating a new release
+for the Directory Rust SDK.
+
+## 1. Create a release branch
+
+Create a branch for the new release:
+
+1. Update the SDK version in:
+   - `Cargo.toml`
+   - `.github/ISSUE_TEMPLATE/bug_report.yml`
+2. Update the dependencies if necessary:
+   - `BUF_TAG` in `Taskfile.yml` (Directory API protos exported from the Buf Schema Registry)
+   - `DIR_CHART_VERSION`, `DIR_IMAGE_TAG` and `DIRCTL_IMAGE_TAG` in `Taskfile.yml` (dir & dir-ctl version)
+3. Add an entry to `CHANGELOG.md`
+
+## 2. Create and push tags
+
+After the release branch is merged, update your main branch:
+
+```sh
+git checkout main
+git pull origin main
+```
+
+To trigger the release workflow, create and push the release tag
+for the last commit:
+
+```sh
+git tag -a v1.8.0
+git push origin v1.8.0
+```

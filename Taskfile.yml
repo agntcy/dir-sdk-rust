@@ -4,9 +4,12 @@
 version: "3"
 
 vars:
-  DIR_CHART_VERSION: '{{ .DIR_CHART_VERSION | default "0.0.0-latest" }}'
-  DIR_IMAGE_TAG: '{{ .DIR_IMAGE_TAG | default "latest" }}'
-  DIRCTL_IMAGE_TAG: '{{ .DIRCTL_IMAGE_TAG | default "latest" }}'
+  # renovate: datasource=github-releases depName=agntcy/dir versioning=semver
+  DIR_CHART_VERSION: '{{ .DIR_CHART_VERSION | default "v1.7.0" }}'
+  # renovate: datasource=github-releases depName=agntcy/dir versioning=semver
+  DIR_IMAGE_TAG: '{{ .DIR_IMAGE_TAG | default "v1.7.0" }}'
+  # renovate: datasource=github-releases depName=agntcy/dir versioning=semver
+  DIRCTL_IMAGE_TAG: '{{ .DIRCTL_IMAGE_TAG | default "v1.7.0" }}'
 
   # renovate: datasource=github-releases depName=renovatebot/renovate versioning=semver
   RENOVATE_VERSION: "44.93.5"
@@ -31,9 +34,9 @@ vars:
 
   KIND_CLUSTER_NAME: "sdk-rust-test"
 
-  # Pinned commit of the Directory API on the Buf Schema Registry. Bump to pick up API changes.
+  # Pinned release tag of the Directory API on the Buf Schema Registry. Bump to pick up API changes.
   BUF_MODULE: "buf.build/agntcy/dir"
-  BUF_COMMIT: "9625cc57c64340fa9b1c5e95b24049f3"
+  BUF_TAG: "v1.7.0"
   API_HOSTPORT: '{{ .API_HOSTPORT | default "8888" }}'
 
 tasks:
@@ -65,10 +68,10 @@ tasks:
         msg: "buf CLI is required (https://buf.build/docs/installation) and must be logged in (`buf registry login`)"
     cmds:
       - rm -rf proto
-      - buf export {{ .BUF_MODULE }}:{{ .BUF_COMMIT }} -o proto
-      - echo "{{ .BUF_MODULE }}:{{ .BUF_COMMIT }}" > proto/.buf-ref
+      - buf export {{ .BUF_MODULE }}:{{ .BUF_TAG }} -o proto
+      - echo "{{ .BUF_MODULE }}:{{ .BUF_TAG }}" > proto/.buf-ref
     status:
-      - test "$(cat proto/.buf-ref 2>/dev/null)" = "{{ .BUF_MODULE }}:{{ .BUF_COMMIT }}"
+      - test "$(cat proto/.buf-ref 2>/dev/null)" = "{{ .BUF_MODULE }}:{{ .BUF_TAG }}"
 
   package:
     desc: Verify the crate packages (and builds) from the exported protos
