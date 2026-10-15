@@ -5,11 +5,11 @@ version: "3"
 
 vars:
   # renovate: datasource=github-releases depName=agntcy/dir versioning=semver
-  DIR_CHART_VERSION: '{{ .DIR_CHART_VERSION | default "v1.7.0" }}'
+  DIR_CHART_VERSION: '{{ .DIR_CHART_VERSION | default "v1.8.0" }}'
   # renovate: datasource=github-releases depName=agntcy/dir versioning=semver
-  DIR_IMAGE_TAG: '{{ .DIR_IMAGE_TAG | default "v1.7.0" }}'
+  DIR_IMAGE_TAG: '{{ .DIR_IMAGE_TAG | default "v1.8.0" }}'
   # renovate: datasource=github-releases depName=agntcy/dir versioning=semver
-  DIRCTL_IMAGE_TAG: '{{ .DIRCTL_IMAGE_TAG | default "v1.7.0" }}'
+  DIRCTL_IMAGE_TAG: '{{ .DIRCTL_IMAGE_TAG | default "v1.8.0" }}'
 
   # renovate: datasource=github-releases depName=renovatebot/renovate versioning=semver
   RENOVATE_VERSION: "44.93.5"
@@ -36,7 +36,7 @@ vars:
 
   # Pinned release tag of the Directory API on the Buf Schema Registry. Bump to pick up API changes.
   BUF_MODULE: "buf.build/agntcy/dir"
-  BUF_TAG: "v1.7.0"
+  BUF_TAG: "v1.8.0"
   API_HOSTPORT: '{{ .API_HOSTPORT | default "8888" }}'
 
 tasks:

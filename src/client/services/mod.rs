@@ -6,7 +6,7 @@
 
 mod base;
 mod events;
-mod naming;
+mod identity;
 mod publication;
 mod routing;
 mod search;
@@ -16,7 +16,7 @@ mod sync;
 
 pub(crate) use base::{collect, rpc};
 pub use events::EventService;
-pub use naming::NamingService;
+pub use identity::IdentityService;
 pub use publication::PublicationService;
 pub use routing::RoutingService;
 pub use search::SearchService;
