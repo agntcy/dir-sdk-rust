@@ -15,15 +15,14 @@ use tonic::Streaming;
 use self::auth::OAuthSessionManager;
 use self::config::Config;
 use self::services::{
-    EventService, NamingService, PublicationService, RoutingService, SearchService, SignService, StoreService,
+    EventService, IdentityService, PublicationService, RoutingService, SearchService, SignService, StoreService,
     SyncService,
 };
 use crate::error::{Error, Result};
 use crate::models::core_v1::{Record, RecordMeta, RecordRef};
 use crate::models::events_v1::{ListenRequest, ListenResponse};
-use crate::models::naming_v1::{
-    GetVerificationInfoRequest, GetVerificationInfoResponse, ResolveRequest, ResolveResponse,
-};
+use crate::models::identity::{GetVerificationInfoRequest, GetVerificationInfoResponse};
+use crate::models::identity_v1::{ResolveRequest, ResolveResponse};
 use crate::models::routing_v1::{
     CreatePublicationResponse, GetPublicationRequest, GetPublicationResponse, ListPublicationsItem,
     ListPublicationsRequest, ListRequest, ListResponse, PublishRequest, SearchRequest, SearchResponse,
@@ -51,7 +50,7 @@ pub struct Client {
     sign_service: SignService,
     sync_service: SyncService,
     event_service: EventService,
-    naming_service: NamingService,
+    identity_service: IdentityService,
 }
 
 impl Client {
@@ -71,7 +70,7 @@ impl Client {
             sign_service: SignService::new(config.clone(), channel.clone()),
             sync_service: SyncService::new(channel.clone()),
             event_service: EventService::new(channel.clone()),
-            naming_service: NamingService::new(channel),
+            identity_service: IdentityService::new(channel),
             oauth_session,
             config,
         })
@@ -112,8 +111,8 @@ impl Client {
     pub fn event_service(&self) -> &EventService {
         &self.event_service
     }
-    pub fn naming_service(&self) -> &NamingService {
-        &self.naming_service
+    pub fn identity_service(&self) -> &IdentityService {
+        &self.identity_service
     }
 
     // --- OIDC -------------------------------------------------------------
@@ -228,15 +227,15 @@ impl Client {
         self.event_service.listen(request).await
     }
 
-    // --- Naming -----------------------------------------------------------
+    // --- Identity ---------------------------------------------------------
 
     pub async fn resolve(&self, request: ResolveRequest) -> Result<ResolveResponse> {
-        self.naming_service.resolve(request).await
+        self.identity_service.resolve(request).await
     }
     pub async fn get_verification_info(
         &self,
         request: GetVerificationInfoRequest,
     ) -> Result<GetVerificationInfoResponse> {
-        self.naming_service.get_verification_info(request).await
+        self.identity_service.get_verification_info(request).await
     }
 }
