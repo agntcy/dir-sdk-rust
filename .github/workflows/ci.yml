@@ -66,9 +66,8 @@ jobs:
       - test
     permissions:
       contents: read
+      id-token: write # Required for crates.io trusted publishing
     uses: ./.github/workflows/reusable-release-sdk.yaml
-    secrets:
-      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
   success:
     name: Success
