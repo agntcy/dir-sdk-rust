@@ -153,7 +153,18 @@ mod tests {
             }),
             from_server: false,
         };
-        let resp = verify_record(&cfg, &req).await.unwrap();
+        // Other tests fork concurrently and can briefly inherit the script's
+        // write fd, making exec fail with ETXTBSY ("Text file busy"); retry.
+        let mut attempt = 0;
+        let resp = loop {
+            match verify_record(&cfg, &req).await {
+                Err(e) if attempt < 10 && e.to_string().contains("Text file busy") => {
+                    attempt += 1;
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                }
+                other => break other.unwrap(),
+            }
+        };
         assert!(resp.success);
     }
 
