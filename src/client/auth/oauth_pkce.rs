@@ -8,7 +8,6 @@ use std::time::Duration;
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
-use rand::RngCore;
 use serde::Deserialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -179,7 +178,7 @@ pub async fn exchange_authorization_code(
 
 fn random_b64url(bytes: usize) -> String {
     let mut buf = vec![0u8; bytes];
-    rand::thread_rng().fill_bytes(&mut buf);
+    rand::fill(&mut buf[..]);
     URL_SAFE_NO_PAD.encode(buf)
 }
 

@@ -25,14 +25,13 @@ use agntcy_dir::models::store_v1::{
 };
 use agntcy_dir::models::{events_v1, identity_v1, routing_v1, search_v1};
 use agntcy_dir::{Client, Config};
-use rand::Rng;
 use serde_json::json;
 use tokio::time::sleep;
 
 const SIGNATURE_TYPE: &str = "agntcy.dir.sign.v1.Signature";
 
 fn short_id() -> String {
-    format!("{:08x}", rand::thread_rng().gen::<u32>())
+    format!("{:08x}", rand::random::<u32>())
 }
 
 fn gen_records(count: usize, test: &str) -> Vec<Record> {
