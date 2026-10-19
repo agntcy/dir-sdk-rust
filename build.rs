@@ -39,7 +39,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let fds_bytes = fds.encode_to_vec();
 
-    tonic_build::configure()
+    tonic_prost_build::configure()
         .build_server(false)
         .compile_well_known_types(true)
         .extern_path(".google.protobuf", "::pbjson_types")

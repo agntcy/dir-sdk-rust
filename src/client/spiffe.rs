@@ -137,7 +137,7 @@ impl WorkloadClient {
             .server_streaming(
                 Self::request(X509svidRequest {}),
                 PathAndQuery::from_static("/SpiffeWorkloadAPI/FetchX509SVID"),
-                tonic::codec::ProstCodec::<X509svidRequest, X509svidResponse>::default(),
+                tonic_prost::ProstCodec::<X509svidRequest, X509svidResponse>::default(),
             )
             .await
             .map_err(Self::status(op))?
@@ -160,7 +160,7 @@ impl WorkloadClient {
             .server_streaming(
                 Self::request(X509BundlesRequest {}),
                 PathAndQuery::from_static("/SpiffeWorkloadAPI/FetchX509Bundles"),
-                tonic::codec::ProstCodec::<X509BundlesRequest, X509BundlesResponse>::default(),
+                tonic_prost::ProstCodec::<X509BundlesRequest, X509BundlesResponse>::default(),
             )
             .await
             .map_err(Self::status(op))?
@@ -186,7 +186,7 @@ impl WorkloadClient {
                     spiffe_id: String::new(),
                 }),
                 PathAndQuery::from_static("/SpiffeWorkloadAPI/FetchJWTSVID"),
-                tonic::codec::ProstCodec::<JwtsvidRequest, JwtsvidResponse>::default(),
+                tonic_prost::ProstCodec::<JwtsvidRequest, JwtsvidResponse>::default(),
             )
             .await
             .map_err(Self::status(op))?
