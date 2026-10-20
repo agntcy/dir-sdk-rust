@@ -19,6 +19,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::sync::OnceLock;
 
 use agntcy_dir::models::core_v1::{Record, RecordRef};
 use agntcy_dir::models::sign_v1::{
@@ -33,7 +34,15 @@ use pkcs8::LineEnding;
 use rand_core::{OsRng, RngCore};
 use serde_json::{json, Value};
 
-const KEY_PASSWORD: &str = "interop-pw";
+/// Password of the keys created by these tests (random for every run).
+fn key_password() -> &'static str {
+    static PASSWORD: OnceLock<String> = OnceLock::new();
+    PASSWORD.get_or_init(|| {
+        let mut bytes = <[u8; 16]>::default();
+        OsRng.fill_bytes(&mut bytes);
+        bytes.iter().map(|b| format!("{b:02x}")).collect()
+    })
+}
 const SIGNATURE_TYPE: &str = "agntcy.dir.sign.v1.Signature";
 const PUBLIC_KEY_TYPE: &str = "agntcy.dir.sign.v1.PublicKey";
 const ECDSA: &str = "ECDSA-P-256";
@@ -90,7 +99,7 @@ async fn setup() -> Option<Env> {
     let output = Command::new(&cosign)
         .arg("generate-key-pair")
         .current_dir(dir.path())
-        .env("COSIGN_PASSWORD", KEY_PASSWORD)
+        .env("COSIGN_PASSWORD", key_password())
         .output()
         .expect("run cosign");
     assert!(output.status.success(), "cosign generate-key-pair: {}", stderr(&output));
@@ -126,12 +135,12 @@ fn write_ed25519_key(dir: &Path) -> KeyPair {
     let key = ed25519_dalek::SigningKey::from_bytes(&seed);
     let pkcs8 = key.to_pkcs8_der().unwrap();
 
-    let (mut salt, mut nonce) = ([0u8; 32], [0u8; 24]);
+    let (mut salt, mut nonce) = (<[u8; 32]>::default(), <[u8; 24]>::default());
     OsRng.fill_bytes(&mut salt);
     OsRng.fill_bytes(&mut nonce);
-    let mut derived = [0u8; 32];
+    let mut derived = <[u8; 32]>::default();
     let params = scrypt::Params::new(15, 8, 1, 32).unwrap();
-    scrypt::scrypt(KEY_PASSWORD.as_bytes(), &salt, &params, &mut derived).unwrap();
+    scrypt::scrypt(key_password().as_bytes(), &salt, &params, &mut derived).unwrap();
     let ciphertext = XSalsa20Poly1305::new(Key::from_slice(&derived))
         .encrypt(Nonce::from_slice(&nonce), pkcs8.as_bytes())
         .unwrap();
@@ -199,7 +208,7 @@ impl Env {
     fn dirctl(&self, args: &[&str]) -> Output {
         Command::new(&self.dirctl)
             .args(args)
-            .env("COSIGN_PASSWORD", KEY_PASSWORD)
+            .env("COSIGN_PASSWORD", key_password())
             .env("DIRECTORY_CLIENT_SERVER_ADDRESS", server_address())
             .output()
             .expect("run dirctl")
@@ -234,7 +243,7 @@ impl Env {
                 provider: Some(sign_v1::SignRequestProvider {
                     request: Some(sign_request_provider::Request::Key(sign_v1::SignWithKey {
                         private_key: private_key.into(),
-                        password: Some(KEY_PASSWORD.as_bytes().to_vec()),
+                        password: Some(key_password().as_bytes().to_vec()),
                     })),
                 }),
             })

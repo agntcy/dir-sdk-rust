@@ -26,7 +26,9 @@ use sigstore_oidc::IdentityToken;
 use sigstore_rekor::{HashedRekord, RekorClient};
 use sigstore_trust_root::{SigstoreInstance, TrustedRoot, TufBootstrap, TufConfig};
 use sigstore_tsa::TimestampClient;
-use sigstore_types::{Bundle, KindVersion};
+use sigstore_types::{
+    Bundle, DerCertificate, KindVersion, Sha256Hash, SignatureBytes, TimestampToken, TransparencyLogEntry,
+};
 use sigstore_verify::{VerificationPolicy, Verifier};
 use x509_cert::der::Decode;
 
@@ -128,6 +130,40 @@ pub async fn sign_blob_with_oidc(payload: &[u8], req: &SignWithOidc) -> Result<(
         .await
         .map_err(|e| Error::Sign(format!("failed to sign record: timestamp authority: {e}")))?;
 
+    package_signature(
+        Packaged {
+            leaf,
+            signature,
+            artifact_hash,
+            timestamp,
+            tlog_entry,
+            signed_at,
+        },
+        public_key_pem,
+    )
+}
+
+/// The signing material gathered from Fulcio, Rekor and the TSA.
+struct Packaged {
+    leaf: DerCertificate,
+    signature: SignatureBytes,
+    artifact_hash: Sha256Hash,
+    timestamp: TimestampToken,
+    tlog_entry: Option<TransparencyLogEntry>,
+    signed_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// Packages the signing material as a Sigstore v0.3 message-signature bundle
+/// and the [`Signature`] / [`PublicKey`] referrers stored for the record.
+fn package_signature(material: Packaged, public_key_pem: String) -> Result<(Signature, PublicKey)> {
+    let Packaged {
+        leaf,
+        signature,
+        artifact_hash,
+        timestamp,
+        tlog_entry,
+        signed_at,
+    } = material;
     let mut bundle = BundleV03::with_certificate_and_signature(leaf.clone(), signature.clone(), artifact_hash)
         .with_rfc3161_timestamp(timestamp);
     if let Some(entry) = tlog_entry {
@@ -388,7 +424,7 @@ mod tests {
         };
         assert_eq!(o.issuer, GITHUB_ISSUER);
         assert!(!o.subject.is_empty());
-        assert!(o.certificate_issuer.contains("sigstore"), "{}", o.certificate_issuer);
+        assert!(o.certificate_issuer.contains("sigstore"));
 
         // exact and regexp subject / issuer matchers
         v.verify(PAYLOAD, "", &o.subject, &sig(BUNDLE)).unwrap();
@@ -432,5 +468,313 @@ mod tests {
         })
         .await;
         lenient.verify(PAYLOAD, "", "", &sig(&no_tlog)).unwrap();
+    }
+
+    // --- signing against mocked Fulcio / Rekor / TSA endpoints ---------------
+
+    use std::sync::Arc;
+
+    use sigstore_types::SignatureContent;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    /// Minimal HTTP/1.1 server answering `(status, body)` per request path.
+    async fn mock_http(routes: impl Fn(&str) -> (u16, String) + Send + Sync + 'static) -> String {
+        let routes = Arc::new(routes);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut stream, _)) = listener.accept().await else {
+                    return;
+                };
+                let routes = routes.clone();
+                tokio::spawn(async move {
+                    let mut buf = Vec::new();
+                    let mut chunk = [0u8; 4096];
+                    let (header_end, length) = loop {
+                        let n = stream.read(&mut chunk).await.unwrap_or(0);
+                        if n == 0 {
+                            return;
+                        }
+                        buf.extend_from_slice(&chunk[..n]);
+                        if let Some(end) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                            let head = String::from_utf8_lossy(&buf[..end]).to_lowercase();
+                            let length = head
+                                .lines()
+                                .find_map(|l| l.strip_prefix("content-length:"))
+                                .and_then(|v| v.trim().parse::<usize>().ok())
+                                .unwrap_or(0);
+                            break (end + 4, length);
+                        }
+                    };
+                    while buf.len() < header_end + length {
+                        let n = stream.read(&mut chunk).await.unwrap_or(0);
+                        if n == 0 {
+                            return;
+                        }
+                        buf.extend_from_slice(&chunk[..n]);
+                    }
+                    let request = String::from_utf8_lossy(&buf[..header_end]).to_string();
+                    let path = request.split_whitespace().nth(1).unwrap_or_default();
+                    let (status, body) = routes(path);
+                    let response = format!(
+                        "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    let _ = stream.write_all(response.as_bytes()).await;
+                    let _ = stream.shutdown().await;
+                });
+            }
+        });
+        base
+    }
+
+    /// An (unsigned) JWT: Fulcio is the only party that validates the token.
+    fn jwt() -> String {
+        use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        let claims = serde_json::json!({
+            "iss": "https://issuer.example", "sub": "subject", "aud": "sigstore",
+            "exp": 4_102_444_800u64, "iat": 1_700_000_000u64,
+            "email": "dev@example.com", "email_verified": true,
+        });
+        format!(
+            "{}.{}.sig",
+            URL_SAFE_NO_PAD.encode(r#"{"alg":"none"}"#),
+            URL_SAFE_NO_PAD.encode(claims.to_string())
+        )
+    }
+
+    fn fixture() -> Bundle {
+        Bundle::from_json(BUNDLE).unwrap()
+    }
+
+    fn fulcio_ok() -> (u16, String) {
+        let chain = serde_json::json!({
+            "signedCertificateEmbeddedSct": {"chain": {"certificates": [fixture().signing_certificate().unwrap().to_pem()]}}
+        });
+        (201, chain.to_string())
+    }
+
+    fn sign_request(base: &str, skip_tlog: bool) -> SignWithOidc {
+        SignWithOidc {
+            id_token: jwt(),
+            options: Some(SignOptionsOidc {
+                fulcio_url: base.into(),
+                rekor_url: base.into(),
+                timestamp_url: format!("{base}/tsa"),
+                skip_tlog,
+                ..Default::default()
+            }),
+        }
+    }
+
+    async fn sign_error(request: &SignWithOidc) -> String {
+        match sign_blob_with_oidc(b"cid", request).await {
+            Err(e) => e.to_string(),
+            Ok(_) => panic!("signing unexpectedly succeeded"),
+        }
+    }
+
+    #[tokio::test]
+    async fn sign_rejects_a_malformed_identity_token() {
+        let mut request = SignWithOidc {
+            id_token: "not-a-jwt".into(),
+            ..Default::default()
+        };
+        assert!(sign_error(&request).await.contains("invalid identity token"));
+        request.id_token = "a.!!.c".into();
+        assert!(sign_error(&request).await.contains("invalid identity token"));
+    }
+
+    #[tokio::test]
+    async fn sign_reports_fulcio_failures() {
+        // unreachable
+        let request = sign_request("http://127.0.0.1:1", true);
+        assert!(sign_error(&request).await.contains("Fulcio"));
+        // rejected token
+        let base = mock_http(|_| (401, "unauthorized".into())).await;
+        let err = sign_error(&sign_request(&base, true)).await;
+        assert!(err.contains("Fulcio") && err.contains("401"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn sign_reports_rekor_failures() {
+        let base = mock_http(|path| {
+            if path.contains("signingCert") {
+                fulcio_ok()
+            } else {
+                (500, "rekor down".into())
+            }
+        })
+        .await;
+        let err = sign_error(&sign_request(&base, false)).await;
+        assert!(err.contains("Rekor"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn sign_reports_timestamp_authority_failures() {
+        for (status, body) in [(500, "tsa down"), (200, "not a timestamp response")] {
+            let base = mock_http(move |path| {
+                if path.contains("signingCert") {
+                    fulcio_ok()
+                } else {
+                    (status, body.into())
+                }
+            })
+            .await;
+            // the transparency log is skipped, so the TSA is the first failing step
+            let err = sign_error(&sign_request(&base, true)).await;
+            assert!(err.contains("timestamp authority"), "{err}");
+        }
+    }
+
+    /// A Rekor v1 `create_entry` response built from the fixture's log entry.
+    fn rekor_ok(checkpoint: Option<&str>) -> (u16, String) {
+        let hex = |b64: &str| -> String { B64.decode(b64).unwrap().iter().map(|b| format!("{b:02x}")).collect() };
+        let bundle: serde_json::Value = serde_json::from_str(BUNDLE).unwrap();
+        let entry = &bundle["verificationMaterial"]["tlogEntries"][0];
+        let proof = &entry["inclusionProof"];
+        let response = serde_json::json!({
+            "a".repeat(64): {
+                "body": entry["canonicalizedBody"],
+                "integratedTime": 1_764_787_003,
+                "logID": hex(entry["logId"]["keyId"].as_str().unwrap()),
+                "logIndex": 738_312_748,
+                "verification": {
+                    "signedEntryTimestamp": entry["inclusionPromise"]["signedEntryTimestamp"],
+                    "inclusionProof": {
+                        "logIndex": 616_408_486,
+                        "rootHash": hex(proof["rootHash"].as_str().unwrap()),
+                        "treeSize": 616_408_488,
+                        "hashes": proof["hashes"].as_array().unwrap().iter()
+                            .map(|h| hex(h.as_str().unwrap())).collect::<Vec<_>>(),
+                        "checkpoint": checkpoint.unwrap_or(proof["checkpoint"]["envelope"].as_str().unwrap()),
+                    },
+                },
+            }
+        });
+        (201, response.to_string())
+    }
+
+    #[tokio::test]
+    async fn sign_reports_invalid_rekor_entries_and_continues_with_valid_ones() {
+        // an unparsable checkpoint is rejected
+        let base = mock_http(|path| {
+            if path.contains("signingCert") {
+                fulcio_ok()
+            } else {
+                rekor_ok(Some("not a checkpoint"))
+            }
+        })
+        .await;
+        let err = sign_error(&sign_request(&base, false)).await;
+        assert!(err.contains("invalid Rekor response"), "{err}");
+
+        // a valid entry is accepted; the (failing) timestamp authority is next
+        let base = mock_http(|path| match path {
+            p if p.contains("signingCert") => fulcio_ok(),
+            p if p.contains("log/entries") => rekor_ok(None),
+            _ => (500, "tsa down".into()),
+        })
+        .await;
+        let err = sign_error(&sign_request(&base, false)).await;
+        assert!(err.contains("timestamp authority"), "{err}");
+    }
+
+    #[test]
+    fn http_client_and_defaults() {
+        assert_eq!(or_default("", "default"), "default");
+        assert_eq!(or_default("custom", "default"), "custom");
+        http_client(Duration::from_secs(1)).unwrap();
+    }
+
+    #[tokio::test]
+    async fn packaged_signature_is_a_verifiable_bundle() {
+        let original = fixture();
+        let SignatureContent::MessageSignature(message) = &original.content else {
+            panic!("fixture is a message signature bundle");
+        };
+        let material = |tlog_entry| Packaged {
+            leaf: original.signing_certificate().unwrap().clone(),
+            signature: message.signature.clone(),
+            artifact_hash: sha256(PAYLOAD),
+            timestamp: original
+                .verification_material
+                .timestamp_verification_data
+                .rfc3161_timestamps[0]
+                .signed_timestamp
+                .clone(),
+            tlog_entry,
+            signed_at: chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap(),
+        };
+        let tlog_entry = original.verification_material.tlog_entries[0].clone();
+
+        let (signature, public_key) = package_signature(material(Some(tlog_entry)), "PEM".into()).unwrap();
+        assert_eq!(public_key.key, "PEM");
+        assert_eq!(signature.signed_at, "2023-11-14T22:13:20Z");
+        assert_eq!(signature.content_type, "application/vnd.dev.sigstore.bundle.v0.3+json");
+        assert_eq!(B64.decode(&signature.signature).unwrap(), message.signature.as_bytes());
+        assert_eq!(
+            B64.decode(&signature.certificate).unwrap(),
+            original.signing_certificate().unwrap().as_bytes()
+        );
+
+        // the produced bundle verifies like the cosign original
+        let (v, _dir) = verifier(Default::default()).await;
+        v.verify(PAYLOAD, GITHUB_ISSUER, "", &signature).unwrap();
+
+        // without a transparency log entry (skip_tlog) the bundle only carries the timestamp
+        let (signature, _) = package_signature(material(None), "PEM".into()).unwrap();
+        let bundle = Bundle::from_json(&signature.content_bundle).unwrap();
+        assert!(bundle.verification_material.tlog_entries.is_empty());
+        assert_eq!(
+            bundle
+                .verification_material
+                .timestamp_verification_data
+                .rfc3161_timestamps
+                .len(),
+            1
+        );
+    }
+
+    // --- trusted root / verifier construction ---------------------------------
+
+    #[tokio::test]
+    async fn trusted_root_from_unreachable_tuf_mirror_fails() {
+        for mirror in ["http://127.0.0.1:1", "http://127.0.0.1:1/sigstage"] {
+            let opts = VerifyOptionsOidc {
+                tuf_mirror_url: mirror.into(),
+                ..Default::default()
+            };
+            let err = load_trusted_root(&opts).await.err().unwrap();
+            assert!(
+                err.to_string().contains("failed to fetch trusted root from TUF"),
+                "{err}"
+            );
+            let err = OidcVerifier::new(Some(&opts)).await.err().unwrap();
+            assert!(err.to_string().contains("failed to get trusted material"), "{err}");
+        }
+    }
+
+    #[tokio::test]
+    async fn invalid_trusted_root_is_rejected_by_the_verifier() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("trusted_root.json");
+        std::fs::write(&root, "{}").unwrap();
+        let opts = VerifyOptionsOidc {
+            trusted_root_path: root.to_string_lossy().into(),
+            ..Default::default()
+        };
+        assert!(OidcVerifier::new(Some(&opts)).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn sct_check_can_be_ignored() {
+        let (v, _dir) = verifier(VerifyOptionsOidc {
+            ignore_sct: true,
+            ..Default::default()
+        })
+        .await;
+        v.verify(PAYLOAD, GITHUB_ISSUER, "", &sig(BUNDLE)).unwrap();
     }
 }

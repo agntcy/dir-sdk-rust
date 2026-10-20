@@ -116,4 +116,10 @@ mod tests {
         assert!(signature_from_referrer(&RecordReferrer::default()).is_err());
         assert!(public_key_from_referrer(&RecordReferrer::default()).is_err());
     }
+
+    #[test]
+    fn only_objects_convert_to_structs() {
+        let err = to_struct(&"not an object", "thing").unwrap_err();
+        assert!(err.to_string().contains("failed to convert thing to struct"), "{err}");
+    }
 }

@@ -287,7 +287,7 @@ fn decrypt_cosign_key(body: &[u8], password: &[u8]) -> Result<Vec<u8>> {
     }
     let params = scrypt::Params::new(n.trailing_zeros() as u8, enc.kdf.params.r, enc.kdf.params.p, 32)
         .map_err(|e| Error::Sign(format!("invalid scrypt parameters: {e}")))?;
-    let mut key = [0u8; 32];
+    let mut key = <[u8; 32]>::default();
     scrypt::scrypt(password, &salt, &params, &mut key).map_err(|e| Error::Sign(format!("deriving key: {e}")))?;
 
     XSalsa20Poly1305::new(Key::from_slice(&key))
@@ -344,7 +344,20 @@ pub(crate) mod tests {
     // (cosign 3.1.3), password "testing-key". Used only by these tests.
     pub const COSIGN_KEY: &str = include_str!("testdata/cosign.key");
     pub const COSIGN_PUB: &str = include_str!("testdata/cosign.pub");
-    pub const COSIGN_PASSWORD: &[u8] = b"testing-key";
+    pub const COSIGN_PASSWORD: &[u8] = include_bytes!("testdata/cosign.password");
+
+    /// An empty password, for keys that are not encrypted.
+    pub fn no_password() -> &'static [u8] {
+        Default::default()
+    }
+
+    /// Random bytes, for passwords and nonces that must not match anything.
+    pub fn random_bytes(len: usize) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.resize_with(len, Default::default);
+        rand_core::RngCore::fill_bytes(&mut OsRng, &mut bytes);
+        bytes
+    }
 
     fn pkcs8_pem(der_label: &str, der: &[u8]) -> String {
         pem::encode_string(der_label, LineEnding::LF, der).unwrap()
@@ -380,8 +393,8 @@ pub(crate) mod tests {
 
     #[test]
     fn wrong_password_is_rejected() {
-        assert!(load_private_key(COSIGN_KEY, b"nope").is_err());
-        assert!(load_private_key(COSIGN_KEY, b"").is_err());
+        assert!(load_private_key(COSIGN_KEY, &random_bytes(8)).is_err());
+        assert!(load_private_key(COSIGN_KEY, no_password()).is_err());
     }
 
     #[test]
@@ -397,9 +410,9 @@ pub(crate) mod tests {
         std::fs::write(&pub_path, COSIGN_PUB).unwrap();
         verify_signature_with_key(pub_path.to_str().unwrap(), &B64.encode(sig), b"cid").unwrap();
 
-        assert!(load_private_key("/definitely/not/a/key", b"").is_err());
-        assert!(load_private_key("hashivault://key", b"").is_err());
-        assert!(load_private_key("", b"").is_err());
+        assert!(load_private_key("/definitely/not/a/key", no_password()).is_err());
+        assert!(load_private_key("hashivault://key", no_password()).is_err());
+        assert!(load_private_key("", no_password()).is_err());
     }
 
     #[test]
@@ -407,7 +420,7 @@ pub(crate) mod tests {
         let key = p384::SecretKey::random(&mut OsRng);
         let der = pkcs8::EncodePrivateKey::to_pkcs8_der(&key).unwrap();
         let pem = pkcs8_pem("PRIVATE KEY", der.as_bytes());
-        let signer = load_private_key(&pem, b"").unwrap();
+        let signer = load_private_key(&pem, no_password()).unwrap();
         assert!(matches!(signer, KeySigner::P384(_)));
         roundtrip(signer, "ECDSA-P-384");
     }
@@ -416,7 +429,7 @@ pub(crate) mod tests {
     fn sec1_ec_private_key() {
         let key = p256::SecretKey::random(&mut OsRng);
         let pem = key.to_sec1_pem(LineEnding::LF).unwrap();
-        let signer = load_private_key(&pem, b"").unwrap();
+        let signer = load_private_key(&pem, no_password()).unwrap();
         roundtrip(signer, "ECDSA-P-256");
     }
 
@@ -427,7 +440,7 @@ pub(crate) mod tests {
         let key = ed25519_dalek::SigningKey::from_bytes(&seed);
         let der = pkcs8::EncodePrivateKey::to_pkcs8_der(&key).unwrap();
         let pem = pkcs8_pem("PRIVATE KEY", der.as_bytes());
-        let signer = load_private_key(&pem, b"").unwrap();
+        let signer = load_private_key(&pem, no_password()).unwrap();
         assert!(matches!(signer, KeySigner::Ed25519(_)));
         roundtrip(signer, "Ed25519");
 
@@ -444,9 +457,9 @@ pub(crate) mod tests {
     fn rsa_pkcs1_and_pkcs8() {
         let key = RsaPrivateKey::new(&mut OsRng, 2048).unwrap();
         let pkcs1 = rsa::pkcs1::EncodeRsaPrivateKey::to_pkcs1_pem(&key, LineEnding::LF).unwrap();
-        roundtrip(load_private_key(&pkcs1, b"").unwrap(), "RSA-2048");
+        roundtrip(load_private_key(&pkcs1, no_password()).unwrap(), "RSA-2048");
         let pkcs8 = pkcs8::EncodePrivateKey::to_pkcs8_pem(&key, LineEnding::LF).unwrap();
-        roundtrip(load_private_key(&pkcs8, b"").unwrap(), "RSA-2048");
+        roundtrip(load_private_key(&pkcs8, no_password()).unwrap(), "RSA-2048");
     }
 
     #[test]
@@ -459,5 +472,223 @@ pub(crate) mod tests {
     #[test]
     fn unknown_algorithm_for_garbage() {
         assert_eq!(detect_key_algorithm("garbage"), "unknown");
+    }
+
+    /// A `ENCRYPTED SIGSTORE PRIVATE KEY` PEM around an arbitrary JSON envelope.
+    fn envelope_pem(envelope: serde_json::Value) -> String {
+        pem::encode_string(COSIGN_ENCRYPTED_LABEL, LineEnding::LF, envelope.to_string().as_bytes()).unwrap()
+    }
+
+    fn envelope(n: u64, r: u32, nonce: &[u8]) -> serde_json::Value {
+        serde_json::json!({
+            "kdf": {"name": "scrypt", "params": {"N": n, "r": r, "p": 1}, "salt": B64.encode([7u8; 32])},
+            "cipher": {"name": "nacl/secretbox", "nonce": B64.encode(nonce)},
+            "ciphertext": B64.encode([1u8; 48]),
+        })
+    }
+
+    fn sign_error(pem: &str) -> String {
+        match load_private_key(pem, &random_bytes(8)) {
+            Err(e) => e.to_string(),
+            Ok(_) => panic!("key unexpectedly loaded"),
+        }
+    }
+
+    #[test]
+    fn malformed_encrypted_keys_are_rejected() {
+        assert!(sign_error(&envelope_pem(serde_json::json!({"kdf": 1}))).contains("unable to parse encrypted"));
+
+        let mut wrong_kdf = envelope(32768, 8, &random_bytes(24));
+        wrong_kdf["kdf"]["name"] = "pbkdf2".into();
+        assert!(sign_error(&envelope_pem(wrong_kdf)).contains("unsupported key encryption pbkdf2/nacl/secretbox"));
+        let mut wrong_cipher = envelope(32768, 8, &random_bytes(24));
+        wrong_cipher["cipher"]["name"] = "aes".into();
+        assert!(sign_error(&envelope_pem(wrong_cipher)).contains("unsupported key encryption scrypt/aes"));
+
+        for (field, what) in [("salt", "salt"), ("nonce", "nonce"), ("ciphertext", "ciphertext")] {
+            let mut bad = envelope(32768, 8, &random_bytes(24));
+            match field {
+                "salt" => bad["kdf"]["salt"] = "!!".into(),
+                "nonce" => bad["cipher"]["nonce"] = "!!".into(),
+                _ => bad["ciphertext"] = "!!".into(),
+            }
+            assert!(sign_error(&envelope_pem(bad)).contains(&format!("invalid {what} in encrypted")));
+        }
+
+        assert!(sign_error(&envelope_pem(envelope(32768, 8, &random_bytes(12)))).contains("invalid nonce length"));
+        for n in [0, 1, 3, 1 << 40] {
+            assert!(
+                sign_error(&envelope_pem(envelope(n, 8, &random_bytes(24))))
+                    .contains("unsupported scrypt cost parameter"),
+                "N={n}"
+            );
+        }
+        assert!(sign_error(&envelope_pem(envelope(16, 0, &random_bytes(24)))).contains("invalid scrypt parameters"));
+        // well-formed envelope, but not encrypted with this password
+        assert!(sign_error(&envelope_pem(envelope(16, 8, &random_bytes(24)))).contains("wrong password or corrupt key"));
+    }
+
+    #[test]
+    fn unsupported_private_keys_are_rejected() {
+        let encrypted = pkcs8_pem("ENCRYPTED PRIVATE KEY", b"x");
+        assert!(sign_error(&encrypted).contains("password-protected PKCS#8"));
+        assert!(sign_error(&pkcs8_pem("CERTIFICATE", b"x")).contains("unsupported private key PEM type"));
+        assert!(sign_error(&pkcs8_pem("PRIVATE KEY", b"not a key")).contains("unsupported private key type"));
+        assert!(sign_error(&pkcs8_pem("EC PRIVATE KEY", b"not a key")).contains("unsupported EC private key"));
+        assert!(sign_error(&pkcs8_pem("RSA PRIVATE KEY", b"not a key")).contains("unable to parse private key"));
+        // inline PEM that is not a PEM block at all is reported, not read as a path
+        assert!(sign_error("-----BEGIN PRIVATE KEY-----\nnope").contains("unable to parse private key"));
+        // a reference that is neither a file nor loadable
+        assert!(sign_error("not-a-file-and-not-pem").contains("loading private key from reference"));
+    }
+
+    #[test]
+    fn key_references_report_errors() {
+        std::env::set_var("AGNTCY_DIR_TEST_KEY_REF", COSIGN_PUB);
+        std::env::remove_var("AGNTCY_DIR_TEST_KEY_UNSET");
+
+        // env:// references resolve (public key) or report the missing variable
+        let sig = load_private_key(COSIGN_KEY, COSIGN_PASSWORD)
+            .unwrap()
+            .sign(b"cid")
+            .unwrap();
+        verify_signature_with_key("env://AGNTCY_DIR_TEST_KEY_REF", &B64.encode(sig), b"cid").unwrap();
+        let err = load_public_key("env://AGNTCY_DIR_TEST_KEY_UNSET").err().unwrap();
+        assert!(
+            err.to_string().contains("AGNTCY_DIR_TEST_KEY_UNSET is not set"),
+            "{err}"
+        );
+        let err = load_private_key("env://AGNTCY_DIR_TEST_KEY_UNSET", no_password())
+            .err()
+            .unwrap();
+        assert!(err.to_string().contains("is not set"), "{err}");
+        // a private key in an environment variable
+        std::env::set_var("AGNTCY_DIR_TEST_PRIVATE_REF", COSIGN_KEY);
+        load_private_key("env://AGNTCY_DIR_TEST_PRIVATE_REF", COSIGN_PASSWORD).unwrap();
+
+        let err = load_public_key("kms://some/key").err().unwrap();
+        assert!(err.to_string().contains("unsupported key reference"), "{err}");
+        let err = load_public_key("/definitely/not/a/key.pub").err().unwrap();
+        assert!(err.to_string().contains("reading key"), "{err}");
+        // inline PEM that is not a public key
+        let err = load_public_key("-----BEGIN PUBLIC KEY-----\nnope").err().unwrap();
+        assert!(err.to_string().contains("failed to load public key"), "{err}");
+    }
+
+    #[test]
+    fn malformed_signatures_never_verify() {
+        let ed25519 = ed25519_dalek::SigningKey::from_bytes(&[3u8; 32]);
+        let rsa = RsaPrivateKey::new(&mut OsRng, 2048).unwrap();
+        let pems = [
+            COSIGN_PUB.to_string(),
+            p384::SecretKey::random(&mut OsRng)
+                .public_key()
+                .to_public_key_pem(LineEnding::LF)
+                .unwrap(),
+            ed25519.verifying_key().to_public_key_pem(LineEnding::LF).unwrap(),
+            rsa.to_public_key().to_public_key_pem(LineEnding::LF).unwrap(),
+        ];
+        for pem in &pems {
+            for bad in [&b""[..], &b"short"[..], &[0xff; 64][..], &[0u8; 512][..]] {
+                assert!(
+                    verify_signature_with_key(pem, &B64.encode(bad), b"cid").is_err(),
+                    "{pem} accepted {} bytes",
+                    bad.len()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn blank_private_key_is_rejected() {
+        assert!(matches!(
+            load_private_key("  \n", no_password()),
+            Err(Error::InvalidArgument(_))
+        ));
+    }
+
+    /// RFC 8032 section 7.3 Ed25519ph test vector ("abc"): the SDK signs and
+    /// verifies byte-for-byte like the reference, and therefore like cosign
+    /// (which signs with `crypto.SHA512` options) and dirctl.
+    #[test]
+    fn ed25519ph_matches_rfc8032_vector() {
+        let seed: [u8; 32] = hex("833fe62409237b9d62ec77587520911e9a759cec1d19755b7da901b96dca3d42")
+            .try_into()
+            .unwrap();
+        let public = hex("ec172b93ad5e563bf4932c70e1245034c35467ef2efd4d64ebf819683467e2bf");
+        let expected = hex("98a70222f0b8121aa9d30f813d683f809e462b469c7ff87639499bb94e6dae41\
+             31f85042463c2a355a2003d062adf5aaa10b8c61e636062aaad11c2a26083406");
+
+        let key = ed25519_dalek::SigningKey::from_bytes(&seed);
+        assert_eq!(key.verifying_key().as_bytes().as_slice(), public.as_slice());
+        let signer = KeySigner::Ed25519(key);
+        assert_eq!(signer.sign(b"abc").unwrap(), expected);
+
+        let pem = signer.public_key_pem().unwrap();
+        verify_signature_with_key(&pem, &B64.encode(&expected), b"abc").unwrap();
+        assert!(verify_signature_with_key(&pem, &B64.encode(&expected), b"abd").is_err());
+    }
+
+    /// Malleable signatures (`s + L`) are rejected (strict verification).
+    #[test]
+    fn non_canonical_ed25519_scalar_is_rejected() {
+        let key = ed25519_dalek::SigningKey::from_bytes(&[9u8; 32]);
+        let signer = KeySigner::Ed25519(key);
+        let pem = signer.public_key_pem().unwrap();
+        let mut sig = signer.sign(b"cid").unwrap();
+        verify_signature_with_key(&pem, &B64.encode(&sig), b"cid").unwrap();
+        // s + L: same point equation, but a malleable (non-canonical) scalar
+        let order: [u8; 32] = hex("edd3f55c1a631258d69cf7a2def9de1400000000000000000000000000000010")
+            .try_into()
+            .unwrap();
+        let mut carry = 0u16;
+        for (byte, l) in sig[32..].iter_mut().zip(order) {
+            let sum = u16::from(*byte) + u16::from(l) + carry;
+            *byte = sum as u8;
+            carry = sum >> 8;
+        }
+        assert!(verify_signature_with_key(&pem, &B64.encode(&sig), b"cid").is_err());
+    }
+
+    fn hex(s: &str) -> Vec<u8> {
+        (0..s.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+            .collect()
+    }
+
+    /// Signature over `bafkreitestcid` made by `cosign sign-blob` (cosign 3.0.5)
+    /// with the key in `testdata/cosign.key`.
+    #[test]
+    fn verifies_signature_made_by_cosign() {
+        const SIGNATURE: &str =
+            "MEUCIQCJomzdBWTNj2k3m1hhBqe1pCmzuQx+Jt2DMnIlEdWPOAIgJeefpNJF+Hd67l0AW+xx+XR8U7doCO547eUMKqMe46Q=";
+        let verifier = verify_signature_with_key(COSIGN_PUB, SIGNATURE, b"bafkreitestcid").unwrap();
+        assert_eq!(verifier.algorithm(), "ECDSA-P-256");
+        assert!(verify_signature_with_key(COSIGN_PUB, SIGNATURE, b"bafkreiother").is_err());
+    }
+
+    /// Ed25519 key in cosign's encrypted format and the signature `dirctl sign
+    /// --key` (v1.8.0) produced over the CID of a pushed record. Ed25519ph is
+    /// deterministic, so the SDK must reproduce the signature byte for byte.
+    #[test]
+    fn ed25519_matches_signature_made_by_dirctl() {
+        const KEY: &str = include_str!("testdata/cosign-ed25519.key");
+        const PUB: &str = include_str!("testdata/cosign-ed25519.pub");
+        const CID: &str = "baeareih2celmgkee6fbl7j2bdqxk6qikbevgo7mfy5k3v3v3uaic4gegcy";
+        const SIGNATURE: &str =
+            "duxD6/+/fAcA2LXZRqZrUvv1lt57zZI0N1WPBDPpmmw3oJVUKB1nfr6f4ns6iJCrB9AjztUCINyvpniaK5bOAg==";
+
+        let signer = load_private_key(KEY, COSIGN_PASSWORD).unwrap();
+        assert!(matches!(signer, KeySigner::Ed25519(_)));
+        assert_eq!(signer.public_key_pem().unwrap(), PUB);
+        assert_eq!(B64.encode(signer.sign(CID.as_bytes()).unwrap()), SIGNATURE);
+        assert_eq!(
+            verify_signature_with_key(PUB, SIGNATURE, CID.as_bytes())
+                .unwrap()
+                .algorithm(),
+            "Ed25519"
+        );
+        assert!(verify_signature_with_key(PUB, SIGNATURE, b"other").is_err());
     }
 }

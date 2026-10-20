@@ -41,7 +41,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let fds_bytes = fds.encode_to_vec();
 
     tonic_prost_build::configure()
-        .build_server(false)
+        // Server stubs back the in-process fake Directory used by the unit tests.
+        .build_server(true)
         .compile_well_known_types(true)
         .extern_path(".google.protobuf", "::pbjson_types")
         .compile_fds(fds)?;
