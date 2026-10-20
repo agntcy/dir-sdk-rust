@@ -8,7 +8,7 @@ Rust client for the [AGNTCY Directory](https://github.com/agntcy/dir), feature-e
 - async (`tokio`) gRPC client on `tonic`/`prost`, with protobuf‑JSON `serde` support on every message
 - every Directory service: store, routing, publication, search, sign/verify, sync, events, identity
 - auth modes: insecure, `tls` (mTLS files), `x509` / `jwt` (SPIFFE Workload API), `oidc` (bearer token + interactive PKCE login with `dirctl`-compatible token cache)
-- signing and local verification through the `dirctl` CLI (native binary or Docker)
+- native signing (cosign keys or keyless Sigstore OIDC) and local verification, no `dirctl` or `cosign` binary required
 - no `protoc` needed: stubs are generated at build time from the vendored `proto/` tree with the pure-Rust `protox`
 
 ## Usage
@@ -61,8 +61,6 @@ More in [`examples/`](examples).
 | `DIRECTORY_CLIENT_OIDC_CALLBACK_PORT` | `8484` | |
 | `DIRECTORY_CLIENT_OIDC_AUTH_TIMEOUT` | `300` | seconds |
 | `DIRECTORY_CLIENT_OIDC_SCOPES` | `openid,profile,email` | comma separated |
-| `DIRCTL_PATH` | `dirctl` | binary used to sign / verify locally |
-| `DIRCTL_IMAGE`, `DIRCTL_IMAGE_TAG` | | run `dirctl` in Docker instead (exclusive with `DIRCTL_PATH`) |
 
 ### OIDC
 
@@ -73,7 +71,7 @@ if !client.has_cached_oauth_token() {
 }
 ```
 
-The cache lives at `$XDG_CONFIG_HOME/dirctl/auth-token.json` (default `~/.config/dirctl/`), shared with `dirctl`.
+The cache lives at `$XDG_CONFIG_HOME/dirctl/auth-token.json` (default `~/.config/dirctl/`), file-compatible with `dirctl`.
 
 ## API
 

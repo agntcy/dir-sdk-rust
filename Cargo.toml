@@ -2,7 +2,7 @@
 name = "agntcy-dir"
 version = "1.8.0"
 edition = "2021"
-rust-version = "1.78"
+rust-version = "1.86"
 description = "Rust SDK for the AGNTCY Directory"
 license = "Apache-2.0"
 homepage = "https://github.com/agntcy/dir-sdk-rust"
@@ -19,7 +19,7 @@ prost = "0.14"
 prost-types = "0.14"
 pbjson = "0.9"
 pbjson-types = "0.9"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "process", "time", "fs", "io-util", "sync"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "fs", "io-util", "sync"] }
 tokio-stream = "0.1"
 tower = { version = "0.5", features = ["util"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
@@ -35,7 +35,28 @@ rand = "0.10"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
 dirs = "7"
 open = "5"
-tempfile = "3"
+regex = "1"
+# Native signing / verification: cosign-compatible key handling (RustCrypto) ...
+p256 = { version = "0.13", features = ["ecdsa", "pkcs8", "pem"] }
+p384 = { version = "0.13", features = ["ecdsa", "pkcs8", "pem"] }
+rsa = { version = "0.9", features = ["sha2", "pem"] }
+ed25519-dalek = { version = "2", features = ["pkcs8", "pem", "digest"] }
+sha2_010 = { package = "sha2", version = "0.10" }
+pkcs8 = { version = "0.10", features = ["pem", "std"] }
+scrypt = { version = "0.11", default-features = false, features = ["std"] }
+crypto_secretbox = { version = "0.1", features = ["std"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
+# ... and keyless Sigstore (Fulcio + Rekor + TSA signing, bundle verification).
+x509-cert = "0.2"
+sigstore-bundle = { version = "0.15", default-features = false }
+sigstore-crypto = { version = "0.15", default-features = false, features = ["aws-lc-rs"] }
+sigstore-fulcio = { version = "0.15", default-features = false, features = ["rustls"] }
+sigstore-oidc = { version = "0.15", default-features = false }
+sigstore-rekor = { version = "0.15", default-features = false, features = ["client", "rustls"] }
+sigstore-trust-root = { version = "0.15", default-features = false, features = ["tuf", "rustls", "aws-lc-rs"] }
+sigstore-tsa = { version = "0.15", default-features = false, features = ["client", "rustls"] }
+sigstore-types = "0.15"
+sigstore-verify = { version = "0.15", default-features = false, features = ["rustls", "aws-lc-rs"] }
 
 [build-dependencies]
 tonic-prost-build = "0.14"

@@ -33,9 +33,15 @@ pub enum Error {
     #[error(transparent)]
     OAuth(#[from] crate::client::auth::OAuthPkceError),
 
-    /// A `dirctl` invocation failed.
+    /// Signing failed (key loading, Fulcio, Rekor, timestamp authority, ...).
     #[error("{0}")]
-    Dirctl(String),
+    Sign(String),
+
+    /// Local signature verification could not be carried out (as opposed to
+    /// a signature that simply does not verify, which is reported in the
+    /// `VerifyResponse`).
+    #[error("{0}")]
+    Verify(String),
 
     /// An argument supplied by the caller was invalid.
     #[error("{0}")]

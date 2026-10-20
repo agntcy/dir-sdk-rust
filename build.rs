@@ -16,6 +16,7 @@ const PROTOS: &[&str] = &[
     "agntcy/dir/routing/v1/routing_service.proto",
     "agntcy/dir/routing/v1/publication_service.proto",
     "agntcy/dir/search/v1/search_service.proto",
+    "agntcy/dir/sign/v1/public_key.proto",
     "agntcy/dir/sign/v1/sign_service.proto",
     "agntcy/dir/store/v1/store_service.proto",
     "agntcy/dir/store/v1/sync_service.proto",

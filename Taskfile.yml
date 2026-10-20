@@ -8,8 +8,6 @@ vars:
   DIR_CHART_VERSION: '{{ .DIR_CHART_VERSION | default "v1.8.0" }}'
   # renovate: datasource=github-releases depName=agntcy/dir versioning=semver
   DIR_IMAGE_TAG: '{{ .DIR_IMAGE_TAG | default "v1.8.0" }}'
-  # renovate: datasource=github-releases depName=agntcy/dir versioning=semver
-  DIRCTL_IMAGE_TAG: '{{ .DIRCTL_IMAGE_TAG | default "v1.8.0" }}'
 
   # renovate: datasource=github-releases depName=renovatebot/renovate versioning=semver
   RENOVATE_VERSION: "44.93.5"
@@ -103,9 +101,8 @@ tasks:
       - which cargo
 
   deps:
-    desc: Install tools needed by the integration tests (dirctl image, cosign)
+    desc: Install tools needed by the integration tests (cosign, used to generate test keys)
     deps:
-      - deps:dir-ctl
       - deps:cosign
 
   test-env:create:
@@ -142,11 +139,6 @@ tasks:
       - task: test-env:create
       - defer: { task: test-env:delete }
       - |
-        # Local override: use a native dirctl (DIRCTL_PATH) instead of the docker image.
-        # Docker `--network host` only reaches the host's localhost on Linux.
-        if [ -z "${DIRCTL_PATH:-}" ]; then
-          export DIRCTL_IMAGE_TAG="{{ .DIRCTL_IMAGE_TAG }}"
-        fi
         export COSIGN_PATH="$(printf "%s" "${COSIGN_PATH:-{{ .COSIGN_BIN }}}")"
         export DIRECTORY_CLIENT_SERVER_ADDRESS="${DIRECTORY_CLIENT_SERVER_ADDRESS:-localhost:{{ .API_HOSTPORT }}}"
 
@@ -376,17 +368,6 @@ tasks:
       - chmod +x {{.BIN_DIR}}/cosign-{{.COSIGN_VERSION}}
     status:
       - test -x {{.COSIGN_BIN}}
-
-  deps:dir-ctl:
-    desc: Install dir-ctl
-    internal: true
-    run: once
-    vars:
-      DIRCTL_IMAGE_TAG: "{{ .DIRCTL_IMAGE_TAG }}"
-    preconditions:
-      - which docker
-    cmds:
-      - docker image pull ghcr.io/agntcy/dir-ctl:{{ .DIRCTL_IMAGE_TAG }}
 
   deps:renovate:
     desc: Install Renovate

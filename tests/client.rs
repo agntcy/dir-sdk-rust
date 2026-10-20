@@ -10,9 +10,9 @@
 //! DIRECTORY_CLIENT_SERVER_ADDRESS=localhost:8888 cargo test --test client -- --ignored
 //! ```
 //!
-//! Environment: `DIRCTL_PATH` (or `DIRCTL_IMAGE`/`DIRCTL_IMAGE_TAG`) and
-//! `COSIGN_PATH` for signing; optional `OIDC_TOKEN` / `OIDC_PROVIDER_URL` /
-//! `OIDC_CLIENT_ID` for keyless signing; `DIRECTORY_SERVER_PEER1_ADDRESS` for sync.
+//! Environment: `COSIGN_PATH` (only to generate a test key pair); optional
+//! `OIDC_TOKEN` / `OIDC_PROVIDER_URL` / `OIDC_CLIENT_ID` for keyless signing;
+//! `DIRECTORY_SERVER_PEER1_ADDRESS` for sync.
 
 use std::time::Duration;
 
@@ -317,7 +317,7 @@ fn signer_summary(s: &SignerInfo) -> String {
 }
 
 #[tokio::test]
-#[ignore = "requires a live Directory node, dirctl and cosign"]
+#[ignore = "requires a live Directory node and cosign"]
 async fn sign_and_verify() {
     let c = client().await;
     let mut refs = c.push(gen_records(2, "sign_verify")).await.unwrap();
@@ -416,8 +416,7 @@ async fn sign_and_verify() {
         )
         .await
         .unwrap_err();
-    // Which check dirctl trips over first (key vs CID) varies by version.
-    assert!(matches!(err, agntcy_dir::Error::Dirctl(_)), "{err}");
+    assert!(matches!(err, agntcy_dir::Error::Sign(_)), "{err}");
 }
 
 fn base64_of(s: &str) -> String {
