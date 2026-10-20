@@ -9,6 +9,8 @@
 
 - Signing and local verification are implemented natively (cosign-compatible keys and keyless Sigstore via the `sigstore-*` crates); the `dirctl` CLI / Docker image is no longer needed.
 - Breaking: removed `Config::dirctl_path`, `Config::docker_config`, `DockerConfig`, `client::dirctl`, `Error::Dirctl` and the `DIRCTL_PATH` / `DIRCTL_IMAGE` / `DIRCTL_IMAGE_TAG` variables; added `Error::Sign` and `Error::Verify`.
+- `dirctl` (release binary, `DIRCTL_VERSION` / `dirctl_image_tag` workflow input) is installed again, but only as a test dependency of the new `tests/dirctl_interop.rs` suite (SDK-signed records verify with `dirctl` and vice versa; byte-identical Ed25519ph signatures).
+- The generated gRPC server stubs are now built too (used by the in-process fake Directory in the unit tests).
 - Minimum supported Rust version is now 1.86 (required by the `sigstore-*` crates).
 
 ## 1.8.0 (2026-10-16)
