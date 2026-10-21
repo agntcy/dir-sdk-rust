@@ -1,0 +1,449 @@
+// Copyright AGNTCY Contributors (https://github.com/agntcy)
+// SPDX-License-Identifier: Apache-2.0
+
+//! Port of `VerifyWithFetcher` (Go `client/utils/verify`).
+
+use std::collections::HashSet;
+
+use super::keys::{verify_signature_with_key, KeyVerifier};
+use super::oidc::OidcVerifier;
+use crate::error::Result;
+use crate::models::core_v1::RecordRef;
+use crate::models::sign_v1::{
+    signer_info, verify_request_provider::Request, Signature, SignerInfo, SignerInfoKey, VerifyOptionsOidc,
+    VerifyRequest, VerifyResponse, VerifyWithAny,
+};
+
+/// Supplies signatures and public keys for a record.
+pub trait Fetcher {
+    async fn pull_signatures(&self, record_ref: &RecordRef) -> Result<Vec<Signature>>;
+    async fn pull_public_keys(&self, record_ref: &RecordRef) -> Result<Vec<String>>;
+}
+
+fn failure(message: &str) -> VerifyResponse {
+    VerifyResponse {
+        success: false,
+        signers: Vec::new(),
+        error_message: Some(message.into()),
+    }
+}
+
+/// Verifies a signature against the given public keys (PEM or key
+/// references); the first key that verifies wins.
+fn verify_with_keys(payload: &[u8], public_keys: &[String], signature: &Signature) -> Option<SignerInfo> {
+    public_keys.iter().find_map(|key| {
+        let verifier: KeyVerifier = verify_signature_with_key(key, &signature.signature, payload).ok()?;
+        Some(SignerInfo {
+            r#type: Some(signer_info::Type::Key(SignerInfoKey {
+                public_key: verifier.public_key_pem().ok()?,
+                algorithm: verifier.algorithm(),
+            })),
+        })
+    })
+}
+
+fn signer_key(signer: &SignerInfo) -> String {
+    match &signer.r#type {
+        Some(signer_info::Type::Key(k)) => format!("key:{}\0{}", k.public_key, k.algorithm),
+        Some(signer_info::Type::Oidc(o)) => format!("oidc:{}\0{}\0{}", o.issuer, o.subject, o.certificate_issuer),
+        None => String::new(),
+    }
+}
+
+/// Lazily builds (and reuses) the trusted material for OIDC verification.
+struct LazyOidc<'a> {
+    opts: Option<&'a VerifyOptionsOidc>,
+    verifier: Option<std::result::Result<OidcVerifier, String>>,
+}
+
+impl<'a> LazyOidc<'a> {
+    fn new(opts: Option<&'a VerifyOptionsOidc>) -> Self {
+        Self { opts, verifier: None }
+    }
+
+    async fn verify(
+        &mut self,
+        payload: &[u8],
+        issuer: &str,
+        subject: &str,
+        signature: &Signature,
+    ) -> std::result::Result<SignerInfo, String> {
+        let verifier = match &mut self.verifier {
+            Some(verifier) => verifier,
+            slot @ None => slot.insert(OidcVerifier::new(self.opts).await.map_err(|e| e.to_string())),
+        };
+        match verifier {
+            Ok(v) => v.verify(payload, issuer, subject, signature).map_err(|e| e.to_string()),
+            Err(e) => Err(e.clone()),
+        }
+    }
+}
+
+/// Runs signature verification for `req` with signatures and keys from `fetcher`.
+pub async fn verify_with_fetcher(req: &VerifyRequest, fetcher: &impl Fetcher) -> Result<VerifyResponse> {
+    let record_ref = match req.record_ref.as_ref() {
+        Some(r) if !r.cid.is_empty() => r,
+        _ => return Err(crate::error::Error::InvalidArgument("record ref is required".into())),
+    };
+
+    // Default provider: any valid signer with default OIDC options.
+    let default_request = Request::Any(VerifyWithAny {
+        oidc_options: Some(VerifyOptionsOidc::default()),
+    });
+    let request = req
+        .provider
+        .as_ref()
+        .and_then(|p| p.request.as_ref())
+        .unwrap_or(&default_request);
+
+    let signatures = fetcher.pull_signatures(record_ref).await?;
+    if signatures.is_empty() {
+        return Ok(failure("no signatures found"));
+    }
+
+    let public_keys = match request {
+        Request::Key(k) => vec![k.public_key.clone()],
+        Request::Any(_) => fetcher.pull_public_keys(record_ref).await?,
+        Request::Oidc(_) => Vec::new(),
+    };
+
+    let payload = record_ref.cid.as_bytes();
+    let any_opts = match request {
+        Request::Any(a) => a.oidc_options.as_ref(),
+        _ => None,
+    };
+    let oidc_opts = match request {
+        Request::Oidc(o) => o.options.as_ref(),
+        _ => None,
+    };
+    let mut oidc = LazyOidc::new(if matches!(request, Request::Oidc(_)) {
+        oidc_opts
+    } else {
+        any_opts
+    });
+
+    let mut seen = HashSet::new();
+    let mut signers = Vec::new();
+    for sig in &signatures {
+        let info = match request {
+            Request::Oidc(p) => oidc.verify(payload, &p.issuer, &p.subject, sig).await.ok(),
+            Request::Key(_) => verify_with_keys(payload, &public_keys, sig),
+            Request::Any(_) if sig.content_bundle.is_empty() => verify_with_keys(payload, &public_keys, sig),
+            Request::Any(_) => oidc.verify(payload, "", "", sig).await.ok(),
+        };
+        // Failed verifications carry no SignerInfo; one result per signer.
+        let Some(info) = info else { continue };
+        if seen.insert(signer_key(&info)) {
+            signers.push(info);
+        }
+    }
+
+    if signers.is_empty() {
+        return Ok(failure("no valid signatures found matching verification criteria"));
+    }
+    Ok(VerifyResponse {
+        success: true,
+        signers,
+        error_message: None,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use base64::engine::general_purpose::STANDARD as B64;
+    use base64::Engine;
+
+    use super::*;
+    use crate::client::signing::keys::tests::{COSIGN_KEY, COSIGN_PASSWORD};
+    use crate::client::signing::keys::{detect_key_algorithm, load_private_key};
+    use crate::models::sign_v1::{SignerInfoOidc, VerifyRequestProvider, VerifyWithKey, VerifyWithOidc};
+
+    struct Fixed {
+        sigs: Vec<Signature>,
+        keys: Vec<String>,
+    }
+
+    impl Fetcher for Fixed {
+        async fn pull_signatures(&self, _: &RecordRef) -> Result<Vec<Signature>> {
+            Ok(self.sigs.clone())
+        }
+        async fn pull_public_keys(&self, _: &RecordRef) -> Result<Vec<String>> {
+            Ok(self.keys.clone())
+        }
+    }
+
+    fn request(cid: &str, request: Option<Request>) -> VerifyRequest {
+        VerifyRequest {
+            record_ref: Some(RecordRef { cid: cid.into() }),
+            provider: request.map(|r| VerifyRequestProvider { request: Some(r) }),
+            from_server: false,
+        }
+    }
+
+    fn signed(cid: &str) -> (Signature, String) {
+        let signer = load_private_key(COSIGN_KEY, COSIGN_PASSWORD).unwrap();
+        let pem = signer.public_key_pem().unwrap();
+        let sig = Signature {
+            signature: B64.encode(signer.sign(cid.as_bytes()).unwrap()),
+            algorithm: detect_key_algorithm(&pem),
+            ..Default::default()
+        };
+        (sig, pem)
+    }
+
+    #[tokio::test]
+    async fn any_provider_with_pulled_key_verifies_and_dedupes() {
+        let (sig, pem) = signed("bafy1");
+        let fetcher = Fixed {
+            sigs: vec![sig.clone(), sig],
+            keys: vec!["junk".into(), pem.clone()],
+        };
+        // no provider -> default (any)
+        let resp = verify_with_fetcher(&request("bafy1", None), &fetcher).await.unwrap();
+        assert!(resp.success, "{:?}", resp.error_message);
+        assert_eq!(resp.signers.len(), 1);
+        match &resp.signers[0].r#type {
+            Some(signer_info::Type::Key(k)) => {
+                assert_eq!(k.public_key, pem);
+                assert_eq!(k.algorithm, "ECDSA-P-256");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn key_provider_uses_supplied_key_only() {
+        let (sig, pem) = signed("bafy1");
+        let fetcher = Fixed {
+            sigs: vec![sig],
+            keys: vec![],
+        };
+        let ok = request("bafy1", Some(Request::Key(VerifyWithKey { public_key: pem })));
+        assert!(verify_with_fetcher(&ok, &fetcher).await.unwrap().success);
+
+        // wrong payload (different CID) must not verify
+        let other = request(
+            "bafy2",
+            Some(Request::Key(VerifyWithKey {
+                public_key: String::new(),
+            })),
+        );
+        let resp = verify_with_fetcher(&other, &fetcher).await.unwrap();
+        assert!(!resp.success);
+        assert_eq!(
+            resp.error_message.as_deref(),
+            Some("no valid signatures found matching verification criteria")
+        );
+    }
+
+    #[tokio::test]
+    async fn cid_mismatch_with_pulled_keys_fails() {
+        let (sig, pem) = signed("bafy1");
+        let fetcher = Fixed {
+            sigs: vec![sig],
+            keys: vec![pem],
+        };
+        let resp = verify_with_fetcher(&request("bafy2", None), &fetcher).await.unwrap();
+        assert!(!resp.success);
+    }
+
+    #[tokio::test]
+    async fn no_signatures_found() {
+        let fetcher = Fixed {
+            sigs: vec![],
+            keys: vec![],
+        };
+        let resp = verify_with_fetcher(&request("bafy1", None), &fetcher).await.unwrap();
+        assert!(!resp.success);
+        assert_eq!(resp.error_message.as_deref(), Some("no signatures found"));
+    }
+
+    #[tokio::test]
+    async fn requires_record_ref() {
+        let fetcher = Fixed {
+            sigs: vec![],
+            keys: vec![],
+        };
+        assert!(verify_with_fetcher(&VerifyRequest::default(), &fetcher).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn oidc_provider_rejects_key_signature_and_garbage_bundle() {
+        let (sig, _) = signed("bafy1");
+        let mut bundle_sig = sig.clone();
+        bundle_sig.content_bundle = "{not a bundle".into();
+        let fetcher = Fixed {
+            sigs: vec![sig, bundle_sig],
+            keys: vec![],
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.json");
+        std::fs::write(&root, sigstore_trust_root::SIGSTORE_PRODUCTION_TRUSTED_ROOT).unwrap();
+        let req = request(
+            "bafy1",
+            Some(Request::Oidc(VerifyWithOidc {
+                issuer: String::new(),
+                subject: String::new(),
+                options: Some(VerifyOptionsOidc {
+                    trusted_root_path: root.to_string_lossy().into(),
+                    ..Default::default()
+                }),
+            })),
+        );
+        let resp = verify_with_fetcher(&req, &fetcher).await.unwrap();
+        assert!(!resp.success);
+    }
+
+    #[test]
+    fn signer_keys_distinguish_signer_kinds() {
+        assert_eq!(signer_key(&SignerInfo::default()), "");
+        let key = SignerInfo {
+            r#type: Some(signer_info::Type::Key(SignerInfoKey {
+                public_key: "k".into(),
+                algorithm: "a".into(),
+            })),
+        };
+        let oidc = SignerInfo {
+            r#type: Some(signer_info::Type::Oidc(SignerInfoOidc {
+                issuer: "i".into(),
+                ..Default::default()
+            })),
+        };
+        assert!(signer_key(&key).starts_with("key:"));
+        assert!(signer_key(&oidc).starts_with("oidc:"));
+        assert_ne!(signer_key(&key), signer_key(&oidc));
+    }
+
+    #[test]
+    fn unloadable_keys_are_skipped_and_bad_signatures_rejected() {
+        let (sig, pem) = signed("bafy1");
+        let info = verify_with_keys(b"bafy1", &["not a key".into(), pem.clone()], &sig).unwrap();
+        assert!(matches!(info.r#type, Some(signer_info::Type::Key(k)) if k.public_key == pem));
+
+        // not base64: treated as raw bytes, which are no valid signature
+        let garbage = Signature {
+            signature: "@@not-base64@@".into(),
+            ..Default::default()
+        };
+        assert!(verify_with_keys(b"bafy1", &[pem], &garbage).is_none());
+        assert!(verify_with_keys(b"bafy1", &[], &sig).is_none());
+    }
+
+    const BUNDLE: &str = include_str!("testdata/cosign-v3-blob.sigstore.json");
+    const PAYLOAD: &str = "test content for cosign\n";
+
+    fn trusted_root() -> (VerifyOptionsOidc, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("trusted_root.json");
+        std::fs::write(&root, sigstore_trust_root::SIGSTORE_PRODUCTION_TRUSTED_ROOT).unwrap();
+        let opts = VerifyOptionsOidc {
+            trusted_root_path: root.to_string_lossy().into(),
+            ..Default::default()
+        };
+        (opts, dir)
+    }
+
+    fn bundle_signature() -> Signature {
+        Signature {
+            signature: "c2ln".into(),
+            content_bundle: BUNDLE.into(),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn real_bundle_verifies_for_any_and_oidc_providers() {
+        let (opts, _dir) = trusted_root();
+        let fetcher = Fixed {
+            // identical signers are reported once
+            sigs: vec![bundle_signature(), bundle_signature()],
+            keys: vec![],
+        };
+        let providers = [
+            Request::Any(VerifyWithAny {
+                oidc_options: Some(opts.clone()),
+            }),
+            Request::Oidc(VerifyWithOidc {
+                issuer: "https://github.com/login/oauth".into(),
+                subject: String::new(),
+                options: Some(opts.clone()),
+            }),
+        ];
+        for provider in providers {
+            let response = verify_with_fetcher(&request(PAYLOAD, Some(provider)), &fetcher)
+                .await
+                .unwrap();
+            assert!(response.success, "{:?}", response.error_message);
+            assert_eq!(response.signers.len(), 1);
+            assert!(matches!(response.signers[0].r#type, Some(signer_info::Type::Oidc(_))));
+        }
+
+        // wrong issuer, and a different record than the one signed
+        let wrong_issuer = Request::Oidc(VerifyWithOidc {
+            issuer: "https://accounts.google.com".into(),
+            subject: String::new(),
+            options: Some(opts.clone()),
+        });
+        assert!(
+            !verify_with_fetcher(&request(PAYLOAD, Some(wrong_issuer)), &fetcher)
+                .await
+                .unwrap()
+                .success
+        );
+        let any = Request::Any(VerifyWithAny {
+            oidc_options: Some(opts),
+        });
+        assert!(
+            !verify_with_fetcher(&request("bafy-other", Some(any)), &fetcher)
+                .await
+                .unwrap()
+                .success
+        );
+    }
+
+    #[tokio::test]
+    async fn unusable_trusted_root_fails_every_bundle_without_retrying() {
+        let fetcher = Fixed {
+            sigs: vec![bundle_signature(), bundle_signature()],
+            keys: vec![],
+        };
+        let oidc = Request::Oidc(VerifyWithOidc {
+            options: Some(VerifyOptionsOidc {
+                trusted_root_path: "/definitely/not/there.json".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        let response = verify_with_fetcher(&request(PAYLOAD, Some(oidc)), &fetcher)
+            .await
+            .unwrap();
+        assert!(!response.success);
+    }
+
+    #[tokio::test]
+    async fn fetcher_failures_are_propagated() {
+        struct Failing {
+            fail_keys: bool,
+        }
+        impl Fetcher for Failing {
+            async fn pull_signatures(&self, _: &RecordRef) -> Result<Vec<Signature>> {
+                if self.fail_keys {
+                    Ok(vec![Signature::default()])
+                } else {
+                    Err(crate::error::Error::Verify("signatures down".into()))
+                }
+            }
+            async fn pull_public_keys(&self, _: &RecordRef) -> Result<Vec<String>> {
+                Err(crate::error::Error::Verify("keys down".into()))
+            }
+        }
+        let err = verify_with_fetcher(&request("bafy1", None), &Failing { fail_keys: false })
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("signatures down"), "{err}");
+        let err = verify_with_fetcher(&request("bafy1", None), &Failing { fail_keys: true })
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("keys down"), "{err}");
+    }
+}

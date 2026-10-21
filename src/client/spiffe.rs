@@ -314,7 +314,7 @@ mod tests {
         // two fake "certificates": short-form and long-form lengths
         let a = [0x30, 0x02, 0xaa, 0xbb];
         let mut b = vec![0x30, 0x82, 0x01, 0x00];
-        b.extend(std::iter::repeat(0u8).take(256));
+        b.extend(std::iter::repeat_n(0u8, 256));
         let mut all = a.to_vec();
         all.extend(&b);
         let parts = split_der_sequences(&all).unwrap();

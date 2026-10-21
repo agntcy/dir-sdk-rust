@@ -5,8 +5,8 @@
 
 pub mod auth;
 pub mod config;
-pub mod dirctl;
 pub mod services;
+mod signing;
 mod spiffe;
 pub mod transport;
 
@@ -62,12 +62,14 @@ impl Client {
         let oauth_session = OAuthSessionManager::new(&config);
         let channel = transport::create_channel(&config, oauth_session.oauth_holder()).await?;
 
+        let store_service = StoreService::new(channel.clone());
+
         Ok(Self {
-            store_service: StoreService::new(channel.clone()),
+            store_service: store_service.clone(),
             routing_service: RoutingService::new(channel.clone()),
             publication_service: PublicationService::new(channel.clone()),
             search_service: SearchService::new(channel.clone()),
-            sign_service: SignService::new(config.clone(), channel.clone()),
+            sign_service: SignService::new(channel.clone(), store_service),
             sync_service: SyncService::new(channel.clone()),
             event_service: EventService::new(channel.clone()),
             identity_service: IdentityService::new(channel),
@@ -197,7 +199,8 @@ impl Client {
 
     // --- Signing ----------------------------------------------------------
 
-    /// Signs a record via `dirctl`.
+    /// Signs a record natively (cosign key or keyless Sigstore OIDC) and
+    /// stores the public key and signature as referrers.
     pub async fn sign(&self, request: &SignRequest) -> Result<()> {
         self.sign_service.sign(request).await
     }

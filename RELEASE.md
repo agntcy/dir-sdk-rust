@@ -12,7 +12,7 @@ Create a branch for the new release:
    - `.github/ISSUE_TEMPLATE/bug_report.yml`
 2. Update the dependencies if necessary:
    - `BUF_TAG` in `Taskfile.yml` (Directory API protos exported from the Buf Schema Registry)
-   - `DIR_CHART_VERSION`, `DIR_IMAGE_TAG` and `DIRCTL_IMAGE_TAG` in `Taskfile.yml` (dir & dir-ctl version)
+   - `DIR_CHART_VERSION` and `DIR_IMAGE_TAG` in `Taskfile.yml` (dir version)
 3. Add an entry to `CHANGELOG.md`
 
 ## 2. Create and push tags

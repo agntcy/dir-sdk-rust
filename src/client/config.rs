@@ -3,9 +3,7 @@
 
 //! Client configuration.
 
-use std::collections::BTreeMap;
 use std::fmt;
-use std::path::Path;
 use std::str::FromStr;
 
 use crate::error::{Error, Result};
@@ -60,80 +58,12 @@ impl fmt::Display for AuthMode {
     }
 }
 
-/// Docker invocation settings for running `dirctl` in a container.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DockerConfig {
-    pub dirctl_image: String,
-    pub dirctl_image_tag: String,
-    pub envs: BTreeMap<String, String>,
-    pub mounts: Vec<String>,
-    pub user: String,
-}
-
-impl DockerConfig {
-    pub const DEFAULT_DIRCTL_IMAGE: &'static str = "ghcr.io/agntcy/dir-ctl";
-    pub const DEFAULT_DIRCTL_IMAGE_TAG: &'static str = "latest";
-
-    /// Full `docker ...` command line up to and including the image name.
-    ///
-    /// Only `type=bind` mounts whose `src=` exists on the host are kept.
-    pub fn command(&self) -> Vec<String> {
-        let mut cmd: Vec<String> = [
-            "docker",
-            "container",
-            "run",
-            "--name=dir-ctl",
-            "--rm",
-            "--network",
-            "host",
-        ]
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
-        if !self.user.is_empty() {
-            cmd.extend(["--user".to_string(), self.user.clone()]);
-        }
-        for (k, v) in &self.envs {
-            cmd.extend(["--env".to_string(), format!("{k}={v}")]);
-        }
-        for mount in self.live_mounts() {
-            cmd.extend(["--mount".to_string(), mount.clone()]);
-        }
-        cmd.push(format!("{}:{}", self.dirctl_image, self.dirctl_image_tag));
-        cmd
-    }
-
-    fn live_mounts(&self) -> impl Iterator<Item = &String> {
-        self.mounts.iter().filter(|m| {
-            m.starts_with("type=bind")
-                && m.split(',')
-                    .find_map(|p| p.strip_prefix("src="))
-                    .is_some_and(|src| Path::new(src).exists())
-        })
-    }
-}
-
-impl Default for DockerConfig {
-    fn default() -> Self {
-        Self {
-            dirctl_image: Self::DEFAULT_DIRCTL_IMAGE.into(),
-            dirctl_image_tag: Self::DEFAULT_DIRCTL_IMAGE_TAG.into(),
-            envs: BTreeMap::new(),
-            mounts: Vec::new(),
-            user: String::new(),
-        }
-    }
-}
-
 /// Configuration for the AGNTCY Directory client.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
     /// `host:port` or a full `http(s)://` URL. A missing scheme is inferred
     /// from [`Config::auth_mode`].
     pub server_address: String,
-    /// Path to the `dirctl` binary (used for signing and local verification).
-    /// Defaults to `dirctl` from `PATH` when no docker config is set.
-    pub dirctl_path: Option<String>,
     pub spiffe_endpoint_socket: String,
     pub auth_mode: AuthMode,
     /// Pre-supplied OIDC access token.
@@ -153,12 +83,10 @@ pub struct Config {
     /// Seconds to wait for the browser callback.
     pub oidc_auth_timeout: f64,
     pub oidc_scopes: Vec<String>,
-    pub docker_config: Option<DockerConfig>,
 }
 
 impl Config {
     pub const DEFAULT_SERVER_ADDRESS: &'static str = "127.0.0.1:8888";
-    pub const DEFAULT_DIRCTL_PATH: &'static str = "dirctl";
     pub const DEFAULT_OIDC_REDIRECT_URI: &'static str = "http://localhost:8484/callback";
     pub const DEFAULT_OIDC_CALLBACK_PORT: u16 = 8484;
     pub const DEFAULT_OIDC_AUTH_TIMEOUT: f64 = 300.0;
@@ -183,21 +111,6 @@ impl Config {
         let var = |name: &str| get(&format!("{prefix}{name}"));
         let or = |name: &str, default: &str| var(name).unwrap_or_else(|| default.to_string());
 
-        let dirctl_path = get("DIRCTL_PATH").filter(|s| !s.is_empty());
-        let image = get("DIRCTL_IMAGE").filter(|s| !s.is_empty());
-        let tag = get("DIRCTL_IMAGE_TAG").filter(|s| !s.is_empty());
-        let docker_config = (image.is_some() || tag.is_some()).then(|| DockerConfig {
-            dirctl_image: image.unwrap_or_else(|| DockerConfig::DEFAULT_DIRCTL_IMAGE.into()),
-            dirctl_image_tag: tag.unwrap_or_else(|| DockerConfig::DEFAULT_DIRCTL_IMAGE_TAG.into()),
-            user: "0:0".into(),
-            ..DockerConfig::default()
-        });
-        if dirctl_path.is_some() && docker_config.is_some() {
-            return Err(Error::Config(
-                "You cannot specify both DIRCTL_PATH and DIRCTL_IMAGE/DIRCTL_IMAGE_TAG.".into(),
-            ));
-        }
-
         let oidc_scopes = match var("OIDC_SCOPES") {
             Some(s) if !s.is_empty() => s
                 .split(',')
@@ -210,7 +123,6 @@ impl Config {
 
         Ok(Self {
             server_address: or("SERVER_ADDRESS", Self::DEFAULT_SERVER_ADDRESS),
-            dirctl_path,
             spiffe_endpoint_socket: or("SPIFFE_SOCKET_PATH", ""),
             auth_mode: or("AUTH_MODE", "").parse()?,
             auth_token: or("AUTH_TOKEN", ""),
@@ -235,7 +147,6 @@ impl Config {
                 "OIDC_AUTH_TIMEOUT",
             )?,
             oidc_scopes,
-            docker_config,
         })
     }
 
@@ -251,35 +162,12 @@ impl Config {
             format!("http://{addr}")
         }
     }
-
-    /// `host:port` form handed to `dirctl` (it adds a port itself when the
-    /// address carries a scheme).
-    pub(crate) fn dirctl_server_address(&self) -> String {
-        let addr = self.server_address.trim();
-        addr.strip_prefix("https://")
-            .or_else(|| addr.strip_prefix("http://"))
-            .unwrap_or(addr)
-            .to_string()
-    }
-
-    /// Resolves the program and leading arguments used to run `dirctl`.
-    pub fn dirctl_command(&self) -> Vec<String> {
-        if let Some(docker) = &self.docker_config {
-            return docker.command();
-        }
-        vec![self
-            .dirctl_path
-            .clone()
-            .filter(|p| !p.is_empty())
-            .unwrap_or_else(|| Self::DEFAULT_DIRCTL_PATH.to_string())]
-    }
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
             server_address: Self::DEFAULT_SERVER_ADDRESS.into(),
-            dirctl_path: None,
             spiffe_endpoint_socket: String::new(),
             auth_mode: AuthMode::Insecure,
             auth_token: String::new(),
@@ -296,7 +184,6 @@ impl Default for Config {
             oidc_callback_port: Self::DEFAULT_OIDC_CALLBACK_PORT,
             oidc_auth_timeout: Self::DEFAULT_OIDC_AUTH_TIMEOUT,
             oidc_scopes: Self::default_oidc_scopes(),
-            docker_config: None,
         }
     }
 }
@@ -334,7 +221,6 @@ mod tests {
         let cfg = Config::from_lookup("DIRECTORY_CLIENT_", lookup(&[])).unwrap();
         assert_eq!(cfg, Config::default());
         assert_eq!(cfg.server_url(), "http://127.0.0.1:8888");
-        assert_eq!(cfg.dirctl_command(), vec!["dirctl"]);
     }
 
     #[test]
@@ -347,7 +233,6 @@ mod tests {
                 ("DIRECTORY_CLIENT_TLS_SKIP_VERIFY", "Yes"),
                 ("DIRECTORY_CLIENT_OIDC_SCOPES", "openid, email ,"),
                 ("DIRECTORY_CLIENT_OIDC_CALLBACK_PORT", "9000"),
-                ("DIRCTL_PATH", "/usr/bin/dirctl"),
             ]),
         )
         .unwrap();
@@ -356,7 +241,6 @@ mod tests {
         assert!(cfg.tls_skip_verify);
         assert_eq!(cfg.oidc_scopes, vec!["openid", "email"]);
         assert_eq!(cfg.oidc_callback_port, 9000);
-        assert_eq!(cfg.dirctl_command(), vec!["/usr/bin/dirctl"]);
     }
 
     #[test]
@@ -367,27 +251,10 @@ mod tests {
             ..Config::default()
         };
         assert_eq!(cfg.server_url(), "http://localhost:1");
-        assert_eq!(cfg.dirctl_server_address(), "localhost:1");
     }
 
     #[test]
-    fn rejects_unknown_auth_mode_and_path_plus_docker() {
+    fn rejects_unknown_auth_mode() {
         assert!(Config::from_lookup("P_", lookup(&[("P_AUTH_MODE", "bogus")])).is_err());
-        assert!(Config::from_lookup("P_", lookup(&[("DIRCTL_PATH", "x"), ("DIRCTL_IMAGE", "y")])).is_err());
-    }
-
-    #[test]
-    fn docker_command_shape() {
-        let mut d = DockerConfig {
-            user: "0:0".into(),
-            ..DockerConfig::default()
-        };
-        d.envs.insert("A".into(), "b".into());
-        d.mounts.push("type=bind,src=/definitely/not/here,dst=/x".into());
-        let cmd = d.command();
-        assert_eq!(&cmd[..3], ["docker", "container", "run"]);
-        assert!(cmd.contains(&"A=b".to_string()));
-        assert!(!cmd.iter().any(|a| a == "--mount"));
-        assert_eq!(cmd.last().unwrap(), "ghcr.io/agntcy/dir-ctl:latest");
     }
 }

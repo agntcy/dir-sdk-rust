@@ -19,6 +19,6 @@ pub mod error;
 pub mod models;
 
 pub use client::auth::{OAuthPkceError, OAuthSessionManager, OAuthTokenHolder};
-pub use client::config::{AuthMode, Config, DockerConfig};
+pub use client::config::{AuthMode, Config};
 pub use client::Client;
 pub use error::{Error, Result};
