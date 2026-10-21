@@ -132,6 +132,17 @@ tasks:
     preconditions:
       - which cargo
 
+  test:runtime:
+    desc: Run the runtime discovery E2E test against a local `dirctl daemon` and a labelled Docker container
+    deps:
+      - task: deps:dirctl
+      - task: proto:export
+    preconditions:
+      - which cargo
+      - which docker
+    cmds:
+      - tests/runtime-e2e/run.sh "${DIRCTL_PATH:-{{ .DIRCTL_BIN }}}" cargo test --test runtime -- --nocapture
+
   test:
     desc: Run unit and integration tests against a live Directory node in a kind cluster
     deps:
