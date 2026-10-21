@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! End-to-end tests of the runtime discovery client against a real
-//! `dirctl daemon` that discovers a labelled Docker container. They skip
-//! themselves unless `DIRECTORY_RUNTIME_ADDRESS` is set; run them with
-//! `task test:runtime`, which starts the daemon and the container.
+//! `dir-runtime` that discovers a labelled pod. They skip themselves unless
+//! `DIRECTORY_RUNTIME_ADDRESS` is set; `task test` sets it after deploying
+//! dir-runtime and the pod (`tests/runtime-e2e/workload.yaml`) to the kind cluster.
 
 use std::time::Duration;
 
@@ -23,7 +23,7 @@ async fn env() -> Option<(RuntimeService, String)> {
 /// picked out by name client-side (the name is not a request filter).
 fn request() -> ListWorkloadsRequest {
     ListWorkloadsRequest {
-        labels: [("sdk.agntcy/discover".to_string(), "true".to_string())].into(),
+        labels: [("org.agntcy/discover".to_string(), "true".to_string())].into(),
         ..Default::default()
     }
 }
@@ -53,12 +53,8 @@ async fn lists_and_gets_the_discovered_workload() {
     };
 
     let listed = discovered(&svc, &name).await;
-    assert_eq!(listed.runtime, "docker");
-    assert_eq!(listed.r#type, "container");
-    assert_eq!(
-        listed.labels.get("sdk.agntcy/agent-type").map(String::as_str),
-        Some("a2a")
-    );
+    assert_eq!(listed.runtime, "kubernetes");
+    assert_eq!(listed.r#type, "pod");
     assert!(
         listed
             .locators
@@ -92,7 +88,7 @@ async fn filters_narrow_the_result() {
 
     assert!(
         matching(ListWorkloadsRequest {
-            runtime_types: vec!["docker".into()],
+            runtime_types: vec!["KUBERNETES".into()],
             ..base()
         })
         .await
@@ -106,7 +102,7 @@ async fn filters_narrow_the_result() {
     );
     assert!(
         !matching(ListWorkloadsRequest {
-            runtime_types: vec!["kubernetes".into()],
+            runtime_types: vec!["docker".into()],
             ..base()
         })
         .await
@@ -120,7 +116,7 @@ async fn filters_narrow_the_result() {
     );
     assert!(
         !matching(ListWorkloadsRequest {
-            labels: [("sdk.agntcy/discover".to_string(), "false".to_string())].into(),
+            labels: [("org.agntcy/discover".to_string(), "false".to_string())].into(),
             ..Default::default()
         })
         .await
@@ -139,5 +135,5 @@ async fn unknown_workload_reports_the_operation() {
         .await
         .unwrap_err();
     assert!(err.to_string().starts_with("get_workload failed:"), "{err}");
-    assert!(err.to_string().contains("workload not found"), "{err}");
+    assert!(err.to_string().contains("not found"), "{err}");
 }
