@@ -41,15 +41,15 @@ fn gen_records(count: usize, test: &str) -> Vec<Record> {
                 "data": {
                     "name": format!("agntcy-{test}-{i}-{}", short_id()),
                     "version": "v3.0.0",
-                    "schema_version": "0.7.0",
+                    "schema_version": "1.1.0",
                     "description": "Research agent for Cisco's marketing strategy.",
                     "authors": ["Cisco Systems"],
                     "created_at": "2025-03-19T17:06:37Z",
                     "skills": [
-                        {"name": "natural_language_processing/natural_language_generation/text_completion", "id": 10201},
-                        {"name": "natural_language_processing/analytical_reasoning/problem_solving", "id": 10702}
+                        {"name": "language_processing/language_generation/text_completion", "id": 10301},
+                        {"name": "reasoning_planning/logical_reasoning/problem_solving", "id": 150102}
                     ],
-                    "locators": [{"type": "docker_image", "url": "https://ghcr.io/agntcy/marketing-strategy"}],
+                    "locators": [{"type": "container_image", "urls": ["https://ghcr.io/agntcy/marketing-strategy"]}],
                     "domains": [{"name": "technology/networking", "id": 103}],
                     "modules": []
                 }
@@ -123,7 +123,7 @@ async fn search_cids() {
         .search_cids(search_v1::SearchCiDsRequest {
             queries: vec![search_v1::RecordQuery {
                 r#type: search_v1::RecordQueryType::SkillId as i32,
-                value: "10201".into(),
+                value: "10301".into(),
                 negate: false,
             }],
             limit: Some(2),
@@ -142,11 +142,11 @@ async fn search_annotation() {
     let record: Record = serde_json::from_value(json!({
         "data": {
             "name": format!("agntcy-annotation-{}", short_id()),
-            "version": "v3.0.0", "schema_version": "0.8.0",
+            "version": "v3.0.0", "schema_version": "1.1.0",
             "description": "Record with custom annotations.",
             "authors": ["AGNTCY"], "created_at": "2025-03-19T17:06:37Z",
             "annotations": {"key": "value"},
-            "skills": [{"name": "natural_language_processing/natural_language_generation/text_completion", "id": 10201}],
+            "skills": [{"name": "language_processing/language_generation/text_completion", "id": 10301}],
             "locators": [], "domains": [{"name": "technology/networking", "id": 103}], "modules": []
         }
     }))

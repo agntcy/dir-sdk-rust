@@ -180,15 +180,15 @@ fn record(name: &str) -> Record {
         "data": {
             "name": format!("agntcy-interop-{name}-{:08x}", rand::random::<u32>()),
             "version": "v3.0.0",
-            "schema_version": "0.7.0",
+            "schema_version": "1.1.0",
             "description": "Record used to test dirctl and SDK interoperability.",
             "authors": ["Cisco Systems"],
             "created_at": "2025-03-19T17:06:37Z",
             "skills": [{
-                "name": "natural_language_processing/natural_language_generation/text_completion",
-                "id": 10201
+                "name": "language_processing/language_generation/text_completion",
+                "id": 10301
             }],
-            "locators": [{"type": "docker_image", "url": "https://ghcr.io/agntcy/marketing-strategy"}],
+            "locators": [{"type": "container_image", "urls": ["https://ghcr.io/agntcy/marketing-strategy"]}],
             "domains": [{"name": "technology/networking", "id": 103}],
             "modules": []
         }
