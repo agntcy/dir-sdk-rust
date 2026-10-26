@@ -3,6 +3,12 @@
 [agntcy/dir]: https://github.com/agntcy/dir
 [agntcy/dir-sdk-rust]: https://github.com/agntcy/dir-sdk-rust
 
+## Unreleased
+
+### Added
+
+- `RuntimeService` (`agntcy.dir.runtime.v1.DiscoveryService`): `get_workload` and `list_workloads` (with all `ListWorkloadsRequest` filters). It connects to dir-runtime's own address with `RuntimeService::connect`, separately from `Client`, so Directory credentials are never sent to it. Models are in `models::runtime_v1`.
+
 ## 1.8.1 (2026-10-21)
 
 ### Changed
