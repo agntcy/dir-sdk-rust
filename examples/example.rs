@@ -18,15 +18,15 @@ fn generate_record(name: &str) -> Result<Record, serde_json::Error> {
         "data": {
             "name": name,
             "version": "v1.0.0",
-            "schema_version": "0.8.0",
+            "schema_version": "1.1.0",
             "description": "My example agent",
             "authors": ["AGNTCY"],
             "created_at": "2025-03-19T17:06:37Z",
             "skills": [
-                {"name": "natural_language_processing/natural_language_generation/text_completion", "id": 10201},
-                {"name": "natural_language_processing/analytical_reasoning/problem_solving", "id": 10702}
+                {"name": "language_processing/language_generation/text_completion", "id": 10301},
+                {"name": "reasoning_planning/logical_reasoning/problem_solving", "id": 150102}
             ],
-            "locators": [{"type": "docker_image", "url": "https://ghcr.io/agntcy/marketing-strategy"}],
+            "locators": [{"type": "container_image", "urls": ["https://ghcr.io/agntcy/marketing-strategy"]}],
             "domains": [{"name": "technology/networking", "id": 103}],
             "annotations": {"env": "prod"}
         }
@@ -56,7 +56,7 @@ async fn main() -> agntcy_dir::Result<()> {
         .search_cids(search_v1::SearchCiDsRequest {
             queries: vec![RecordQuery {
                 r#type: RecordQueryType::SkillId as i32,
-                value: "10201".into(),
+                value: "10301".into(),
                 negate: false,
             }],
             limit: Some(3),
@@ -89,7 +89,7 @@ async fn main() -> agntcy_dir::Result<()> {
         .list(routing_v1::ListRequest {
             queries: vec![routing_v1::RecordQuery {
                 r#type: routing_v1::RecordQueryType::Skill as i32,
-                value: "natural_language_processing/analytical_reasoning/problem_solving".into(),
+                value: "reasoning_planning/logical_reasoning/problem_solving".into(),
             }],
             limit: None,
         })
