@@ -174,6 +174,7 @@ mod tests {
     use std::pin::Pin;
     use std::sync::{Arc, Mutex};
 
+    use pkcs8::EncodePrivateKey;
     use tokio_stream::wrappers::TcpListenerStream;
     use tokio_stream::{Stream, StreamExt};
     use tonic::{Request, Response, Status, Streaming};
@@ -423,11 +424,9 @@ mod tests {
     async fn ed25519_key_signs_and_verifies_through_the_store() {
         let mut seed = [0u8; 32];
         rand_core::RngCore::fill_bytes(&mut rand_core::OsRng, &mut seed);
-        let pem = pkcs8_011::EncodePrivateKey::to_pkcs8_pem(
-            &ed25519_dalek::SigningKey::from_bytes(&seed),
-            pkcs8_011::LineEnding::LF,
-        )
-        .unwrap();
+        let pem = ed25519_dalek::SigningKey::from_bytes(&seed)
+            .to_pkcs8_pem(pkcs8::LineEnding::LF)
+            .unwrap();
 
         let client = Fake::default().start().await;
         let service = client.sign_service();
@@ -637,7 +636,7 @@ mod tests {
     #[tokio::test]
     async fn wrong_key_is_rejected() {
         let (_, client) = signed().await;
-        let other = p256::SecretKey::random(&mut rand_core::OsRng);
+        let other = crate::client::signing::keys::tests::random_p256();
         let other_pem =
             p256::pkcs8::EncodePublicKey::to_public_key_pem(&other.public_key(), pkcs8::LineEnding::LF).unwrap();
         let response = client

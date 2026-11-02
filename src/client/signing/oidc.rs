@@ -329,7 +329,7 @@ impl OidcVerifier {
         let certificate_issuer = bundle
             .signing_certificate()
             .and_then(|c| x509_cert::Certificate::from_der(c.as_bytes()).ok())
-            .map(|c| c.tbs_certificate.issuer.to_string())
+            .map(|c| c.tbs_certificate().issuer().to_string())
             .unwrap_or_default();
 
         Ok(SignerInfo {

@@ -22,6 +22,7 @@ use crypto_secretbox::aead::{Aead, KeyInit};
 use crypto_secretbox::{Key, Nonce, XSalsa20Poly1305};
 use pkcs8::der::pem;
 use pkcs8::{DecodePrivateKey, DecodePublicKey, EncodePublicKey, LineEnding};
+use pkcs8_010::{DecodePrivateKey as _, DecodePublicKey as _, EncodePublicKey as _};
 use rand_core::OsRng;
 use rsa::pkcs1::DecodeRsaPrivateKey;
 use rsa::traits::PublicKeyParts;
@@ -82,16 +83,22 @@ impl KeySigner {
     /// The PKIX public key as PEM (`PUBLIC KEY`, LF line endings).
     pub fn public_key_pem(&self) -> Result<String> {
         let pem = match self {
-            KeySigner::P256(k) => k.verifying_key().to_public_key_pem(LineEnding::LF),
-            KeySigner::P384(k) => k.verifying_key().to_public_key_pem(LineEnding::LF),
-            KeySigner::Rsa(k) => k.to_public_key().to_public_key_pem(LineEnding::LF),
-            KeySigner::Ed25519(k) => {
-                use pkcs8_011::EncodePublicKey as _;
-                return k
-                    .verifying_key()
-                    .to_public_key_pem(pkcs8_011::LineEnding::LF)
-                    .map_err(|e| Error::Sign(format!("getting public key: {e}")));
-            }
+            KeySigner::P256(k) => k
+                .verifying_key()
+                .to_public_key_pem(LineEnding::LF)
+                .map_err(|e| e.to_string()),
+            KeySigner::P384(k) => k
+                .verifying_key()
+                .to_public_key_pem(LineEnding::LF)
+                .map_err(|e| e.to_string()),
+            KeySigner::Rsa(k) => k
+                .to_public_key()
+                .to_public_key_pem(pkcs8_010::LineEnding::LF)
+                .map_err(|e| e.to_string()),
+            KeySigner::Ed25519(k) => k
+                .verifying_key()
+                .to_public_key_pem(LineEnding::LF)
+                .map_err(|e| e.to_string()),
         };
         pem.map_err(|e| Error::Sign(format!("getting public key: {e}")))
     }
@@ -139,15 +146,12 @@ impl KeyVerifier {
     /// The PKIX public key as PEM (`PUBLIC KEY`, LF line endings).
     pub fn public_key_pem(&self) -> Result<String> {
         let pem = match self {
-            KeyVerifier::P256(k) => k.to_public_key_pem(LineEnding::LF),
-            KeyVerifier::P384(k) => k.to_public_key_pem(LineEnding::LF),
-            KeyVerifier::Rsa(k) => k.to_public_key_pem(LineEnding::LF),
-            KeyVerifier::Ed25519(k) => {
-                use pkcs8_011::EncodePublicKey as _;
-                return k
-                    .to_public_key_pem(pkcs8_011::LineEnding::LF)
-                    .map_err(|e| Error::Verify(format!("failed to marshal public key to PEM: {e}")));
-            }
+            KeyVerifier::P256(k) => k.to_public_key_pem(LineEnding::LF).map_err(|e| e.to_string()),
+            KeyVerifier::P384(k) => k.to_public_key_pem(LineEnding::LF).map_err(|e| e.to_string()),
+            KeyVerifier::Rsa(k) => k
+                .to_public_key_pem(pkcs8_010::LineEnding::LF)
+                .map_err(|e| e.to_string()),
+            KeyVerifier::Ed25519(k) => k.to_public_key_pem(LineEnding::LF).map_err(|e| e.to_string()),
         };
         pem.map_err(|e| Error::Verify(format!("failed to marshal public key to PEM: {e}")))
     }
@@ -232,7 +236,7 @@ fn key_from_pkcs8(der: &[u8]) -> Result<KeySigner> {
     if let Ok(k) = p384::SecretKey::from_pkcs8_der(der) {
         return Ok(KeySigner::P384(k.into()));
     }
-    if let Ok(k) = <ed25519_dalek::SigningKey as pkcs8_011::DecodePrivateKey>::from_pkcs8_der(der) {
+    if let Ok(k) = <ed25519_dalek::SigningKey as pkcs8::DecodePrivateKey>::from_pkcs8_der(der) {
         return Ok(KeySigner::Ed25519(k));
     }
     if let Ok(k) = RsaPrivateKey::from_pkcs8_der(der) {
@@ -297,7 +301,7 @@ fn decrypt_cosign_key(body: &[u8], password: &[u8]) -> Result<Vec<u8>> {
     if !n.is_power_of_two() || n < 2 || n.trailing_zeros() > u32::from(MAX_SCRYPT_LOG_N) {
         return Err(Error::Sign("unsupported scrypt cost parameter".into()));
     }
-    let params = scrypt::Params::new(n.trailing_zeros() as u8, enc.kdf.params.r, enc.kdf.params.p, 32)
+    let params = scrypt::Params::new(n.trailing_zeros() as u8, enc.kdf.params.r, enc.kdf.params.p)
         .map_err(|e| Error::Sign(format!("invalid scrypt parameters: {e}")))?;
     let mut key = <[u8; 32]>::default();
     scrypt::scrypt(password, &salt, &params, &mut key).map_err(|e| Error::Sign(format!("deriving key: {e}")))?;
@@ -324,7 +328,7 @@ fn parse_public_key_pem(pem_str: &str) -> Result<KeyVerifier> {
     if let Ok(k) = p384::PublicKey::from_public_key_pem(pem_str) {
         return Ok(KeyVerifier::P384(k.into()));
     }
-    if let Ok(k) = <ed25519_dalek::VerifyingKey as pkcs8_011::DecodePublicKey>::from_public_key_pem(pem_str) {
+    if let Ok(k) = <ed25519_dalek::VerifyingKey as pkcs8::DecodePublicKey>::from_public_key_pem(pem_str) {
         return Ok(KeyVerifier::Ed25519(k));
     }
     if let Ok(k) = RsaPublicKey::from_public_key_pem(pem_str) {
@@ -361,6 +365,14 @@ pub(crate) mod tests {
     /// An empty password, for keys that are not encrypted.
     pub fn no_password() -> &'static [u8] {
         Default::default()
+    }
+
+    pub fn random_p256() -> p256::SecretKey {
+        p256::SecretKey::from_slice(&random_bytes(32)).unwrap()
+    }
+
+    pub fn random_p384() -> p384::SecretKey {
+        p384::SecretKey::from_slice(&random_bytes(48)).unwrap()
     }
 
     /// Random bytes, for passwords and nonces that must not match anything.
@@ -429,7 +441,7 @@ pub(crate) mod tests {
 
     #[test]
     fn plain_pkcs8_ecdsa_p384() {
-        let key = p384::SecretKey::random(&mut OsRng);
+        let key = random_p384();
         let der = pkcs8::EncodePrivateKey::to_pkcs8_der(&key).unwrap();
         let pem = pkcs8_pem("PRIVATE KEY", der.as_bytes());
         let signer = load_private_key(&pem, no_password()).unwrap();
@@ -439,7 +451,7 @@ pub(crate) mod tests {
 
     #[test]
     fn sec1_ec_private_key() {
-        let key = p256::SecretKey::random(&mut OsRng);
+        let key = random_p256();
         let pem = key.to_sec1_pem(LineEnding::LF).unwrap();
         let signer = load_private_key(&pem, no_password()).unwrap();
         roundtrip(signer, "ECDSA-P-256");
@@ -450,15 +462,14 @@ pub(crate) mod tests {
         let mut seed = [0u8; 32];
         rand_core::RngCore::fill_bytes(&mut OsRng, &mut seed);
         let key = ed25519_dalek::SigningKey::from_bytes(&seed);
-        let der = pkcs8_011::EncodePrivateKey::to_pkcs8_der(&key).unwrap();
+        let der = pkcs8::EncodePrivateKey::to_pkcs8_der(&key).unwrap();
         let pem = pkcs8_pem("PRIVATE KEY", der.as_bytes());
         let signer = load_private_key(&pem, no_password()).unwrap();
         assert!(matches!(signer, KeySigner::Ed25519(_)));
         roundtrip(signer, "Ed25519");
 
         // pure Ed25519 signatures are accepted too
-        let pub_pem =
-            pkcs8_011::EncodePublicKey::to_public_key_pem(&key.verifying_key(), pkcs8_011::LineEnding::LF).unwrap();
+        let pub_pem = key.verifying_key().to_public_key_pem(LineEnding::LF).unwrap();
         let pure = ed25519_dalek::Signer::sign(&key, b"cid");
         verify_signature_with_key(&pub_pem, &B64.encode(pure.to_bytes()), b"cid").unwrap();
         // and Ed25519ph must not verify as a different payload
@@ -473,7 +484,7 @@ pub(crate) mod tests {
         let key = RsaPrivateKey::new(&mut OsRng, 2048).unwrap();
         let pkcs1 = rsa::pkcs1::EncodeRsaPrivateKey::to_pkcs1_pem(&key, LineEnding::LF).unwrap();
         roundtrip(load_private_key(&pkcs1, no_password()).unwrap(), "RSA-2048");
-        let pkcs8 = pkcs8::EncodePrivateKey::to_pkcs8_pem(&key, LineEnding::LF).unwrap();
+        let pkcs8 = pkcs8_010::EncodePrivateKey::to_pkcs8_pem(&key, pkcs8_010::LineEnding::LF).unwrap();
         roundtrip(load_private_key(&pkcs8, no_password()).unwrap(), "RSA-2048");
     }
 
@@ -596,12 +607,11 @@ pub(crate) mod tests {
         let rsa = RsaPrivateKey::new(&mut OsRng, 2048).unwrap();
         let pems = [
             COSIGN_PUB.to_string(),
-            p384::SecretKey::random(&mut OsRng)
-                .public_key()
-                .to_public_key_pem(LineEnding::LF)
+            random_p384().public_key().to_public_key_pem(LineEnding::LF).unwrap(),
+            ed25519.verifying_key().to_public_key_pem(LineEnding::LF).unwrap(),
+            rsa.to_public_key()
+                .to_public_key_pem(pkcs8_010::LineEnding::LF)
                 .unwrap(),
-            pkcs8_011::EncodePublicKey::to_public_key_pem(&ed25519.verifying_key(), pkcs8_011::LineEnding::LF).unwrap(),
-            rsa.to_public_key().to_public_key_pem(LineEnding::LF).unwrap(),
         ];
         for pem in &pems {
             for bad in [&b""[..], &b"short"[..], &[0xff; 64][..], &[0u8; 512][..]] {
