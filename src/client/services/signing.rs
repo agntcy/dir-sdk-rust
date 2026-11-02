@@ -174,7 +174,6 @@ mod tests {
     use std::pin::Pin;
     use std::sync::{Arc, Mutex};
 
-    use pkcs8::EncodePrivateKey;
     use tokio_stream::wrappers::TcpListenerStream;
     use tokio_stream::{Stream, StreamExt};
     use tonic::{Request, Response, Status, Streaming};
@@ -424,9 +423,11 @@ mod tests {
     async fn ed25519_key_signs_and_verifies_through_the_store() {
         let mut seed = [0u8; 32];
         rand_core::RngCore::fill_bytes(&mut rand_core::OsRng, &mut seed);
-        let pem = ed25519_dalek::SigningKey::from_bytes(&seed)
-            .to_pkcs8_pem(pkcs8::LineEnding::LF)
-            .unwrap();
+        let pem = pkcs8_011::EncodePrivateKey::to_pkcs8_pem(
+            &ed25519_dalek::SigningKey::from_bytes(&seed),
+            pkcs8_011::LineEnding::LF,
+        )
+        .unwrap();
 
         let client = Fake::default().start().await;
         let service = client.sign_service();
