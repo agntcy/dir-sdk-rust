@@ -40,7 +40,7 @@ regex = "1"
 p256 = { version = "0.13", features = ["ecdsa", "pkcs8", "pem"] }
 p384 = { version = "0.13", features = ["ecdsa", "pkcs8", "pem"] }
 rsa = { version = "0.9", features = ["sha2", "pem"] }
-ed25519-dalek = { version = "2", features = ["pkcs8", "pem", "digest"] }
+ed25519-dalek = { version = "3", features = ["pkcs8", "pem", "digest"] }
 sha2_010 = { package = "sha2", version = "0.10" }
 pkcs8 = { version = "0.10", features = ["pem", "std"] }
 scrypt = { version = "0.11", default-features = false, features = ["std"] }
