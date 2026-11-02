@@ -139,7 +139,7 @@ fn write_ed25519_key(dir: &Path) -> KeyPair {
     OsRng.fill_bytes(&mut salt);
     OsRng.fill_bytes(&mut nonce);
     let mut derived = <[u8; 32]>::default();
-    let params = scrypt::Params::new(15, 8, 1, 32).unwrap();
+    let params = scrypt::Params::new(15, 8, 1).unwrap();
     scrypt::scrypt(key_password().as_bytes(), &salt, &params, &mut derived).unwrap();
     let ciphertext = XSalsa20Poly1305::new(Key::from_slice(&derived))
         .encrypt(Nonce::from_slice(&nonce), pkcs8.as_bytes())
