@@ -43,7 +43,7 @@ rsa = { version = "0.9", features = ["sha2", "pem"] }
 ed25519-dalek = { version = "3", features = ["pkcs8", "pem", "digest"] }
 sha2_010 = { package = "sha2", version = "0.10" }
 pkcs8 = { version = "0.11", features = ["pem", "std"] }
-# rsa 0.9 still builds on pkcs8 0.10
+# rsa 0.9 still builds on pkcs8 0.10 / sha2 0.10 / rand_core 0.6
 pkcs8_010 = { package = "pkcs8", version = "0.10", features = ["pem", "std"] }
 scrypt = { version = "0.12", default-features = false, features = ["kdf"] }
 crypto_secretbox = { version = "0.1", features = ["std"] }
