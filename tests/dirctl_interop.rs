@@ -31,7 +31,6 @@ use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
 use ed25519_dalek::pkcs8::{EncodePrivateKey, EncodePublicKey};
 use pkcs8::LineEnding;
-use rand_core::{OsRng, RngCore};
 use serde_json::{json, Value};
 
 /// Password of the keys created by these tests (random for every run).
@@ -39,7 +38,7 @@ fn key_password() -> &'static str {
     static PASSWORD: OnceLock<String> = OnceLock::new();
     PASSWORD.get_or_init(|| {
         let mut bytes = <[u8; 16]>::default();
-        OsRng.fill_bytes(&mut bytes);
+        rand::fill(&mut bytes[..]);
         bytes.iter().map(|b| format!("{b:02x}")).collect()
     })
 }
@@ -131,13 +130,13 @@ fn write_ed25519_key(dir: &Path) -> KeyPair {
     use crypto_secretbox::{Key, Nonce, XSalsa20Poly1305};
 
     let mut seed = [0u8; 32];
-    OsRng.fill_bytes(&mut seed);
+    rand::fill(&mut seed[..]);
     let key = ed25519_dalek::SigningKey::from_bytes(&seed);
     let pkcs8 = key.to_pkcs8_der().unwrap();
 
     let (mut salt, mut nonce) = (<[u8; 32]>::default(), <[u8; 24]>::default());
-    OsRng.fill_bytes(&mut salt);
-    OsRng.fill_bytes(&mut nonce);
+    rand::fill(&mut salt[..]);
+    rand::fill(&mut nonce[..]);
     let mut derived = <[u8; 32]>::default();
     let params = scrypt::Params::new(15, 8, 1).unwrap();
     scrypt::scrypt(key_password().as_bytes(), &salt, &params, &mut derived).unwrap();

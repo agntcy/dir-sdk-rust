@@ -351,7 +351,6 @@ pub fn verify_signature_with_key(public_key: &str, signature: &str, payload: &[u
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use rand_core::OsRng;
 
     // Throwaway ECDSA P-256 key generated with `cosign generate-key-pair`
     // (cosign 3.1.3), password "testing-key". Used only by these tests.
@@ -376,7 +375,7 @@ pub(crate) mod tests {
     pub fn random_bytes(len: usize) -> Vec<u8> {
         let mut bytes = Vec::new();
         bytes.resize_with(len, Default::default);
-        rand_core::RngCore::fill_bytes(&mut OsRng, &mut bytes);
+        rand::fill(&mut bytes[..]);
         bytes
     }
 
@@ -457,7 +456,7 @@ pub(crate) mod tests {
     #[test]
     fn ed25519_signs_as_ph_and_verifies_both_modes() {
         let mut seed = [0u8; 32];
-        rand_core::RngCore::fill_bytes(&mut OsRng, &mut seed);
+        rand::fill(&mut seed[..]);
         let key = ed25519_dalek::SigningKey::from_bytes(&seed);
         let der = pkcs8::EncodePrivateKey::to_pkcs8_der(&key).unwrap();
         let pem = pkcs8_pem("PRIVATE KEY", der.as_bytes());

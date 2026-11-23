@@ -423,7 +423,7 @@ mod tests {
     #[tokio::test]
     async fn ed25519_key_signs_and_verifies_through_the_store() {
         let mut seed = [0u8; 32];
-        rand_core::RngCore::fill_bytes(&mut rand_core::OsRng, &mut seed);
+        rand::fill(&mut seed[..]);
         let pem = ed25519_dalek::SigningKey::from_bytes(&seed)
             .to_pkcs8_pem(pkcs8::LineEnding::LF)
             .unwrap();
