@@ -22,14 +22,12 @@ use crypto_secretbox::aead::{Aead, KeyInit};
 use crypto_secretbox::{Key, Nonce, XSalsa20Poly1305};
 use pkcs8::der::pem;
 use pkcs8::{DecodePrivateKey, DecodePublicKey, EncodePublicKey, LineEnding};
-use pkcs8_010::{DecodePrivateKey as _, DecodePublicKey as _, EncodePublicKey as _};
-use rand_core::OsRng;
 use rsa::pkcs1::DecodeRsaPrivateKey;
 use rsa::traits::PublicKeyParts;
-use rsa::{RsaPrivateKey, RsaPublicKey};
+use rsa::{PrivateKey, PublicKey};
 use serde::Deserialize;
 use sha2::Sha512;
-use sha2_010::{Digest, Sha256};
+use sha2::{Digest, Sha256};
 
 use crate::error::{Error, Result};
 
@@ -42,7 +40,7 @@ const MAX_SCRYPT_LOG_N: u8 = 22;
 pub enum KeySigner {
     P256(p256::ecdsa::SigningKey),
     P384(p384::ecdsa::SigningKey),
-    Rsa(Box<RsaPrivateKey>),
+    Rsa(Box<PrivateKey>),
     /// Signs as Ed25519ph.
     Ed25519(ed25519_dalek::SigningKey),
 }
@@ -67,7 +65,7 @@ impl KeySigner {
                 use rsa::signature::{RandomizedSigner, SignatureEncoding};
                 let signing_key = rsa::pkcs1v15::SigningKey::<Sha256>::new((**k).clone());
                 let sig = signing_key
-                    .try_sign_with_rng(&mut OsRng, message)
+                    .try_sign_with_rng(&mut rand::rngs::SysRng, message)
                     .map_err(|e| sign_err(&e))?;
                 Ok(sig.to_vec())
             }
@@ -93,7 +91,7 @@ impl KeySigner {
                 .map_err(|e| e.to_string()),
             KeySigner::Rsa(k) => k
                 .to_public_key()
-                .to_public_key_pem(pkcs8_010::LineEnding::LF)
+                .to_public_key_pem(pkcs8::LineEnding::LF)
                 .map_err(|e| e.to_string()),
             KeySigner::Ed25519(k) => k
                 .verifying_key()
@@ -108,7 +106,7 @@ impl KeySigner {
 pub enum KeyVerifier {
     P256(p256::ecdsa::VerifyingKey),
     P384(p384::ecdsa::VerifyingKey),
-    Rsa(Box<RsaPublicKey>),
+    Rsa(Box<PublicKey>),
     Ed25519(ed25519_dalek::VerifyingKey),
 }
 
@@ -148,9 +146,7 @@ impl KeyVerifier {
         let pem = match self {
             KeyVerifier::P256(k) => k.to_public_key_pem(LineEnding::LF).map_err(|e| e.to_string()),
             KeyVerifier::P384(k) => k.to_public_key_pem(LineEnding::LF).map_err(|e| e.to_string()),
-            KeyVerifier::Rsa(k) => k
-                .to_public_key_pem(pkcs8_010::LineEnding::LF)
-                .map_err(|e| e.to_string()),
+            KeyVerifier::Rsa(k) => k.to_public_key_pem(pkcs8::LineEnding::LF).map_err(|e| e.to_string()),
             KeyVerifier::Ed25519(k) => k.to_public_key_pem(LineEnding::LF).map_err(|e| e.to_string()),
         };
         pem.map_err(|e| Error::Verify(format!("failed to marshal public key to PEM: {e}")))
@@ -219,7 +215,7 @@ fn parse_private_key_pem(pem_bytes: &[u8], password: &[u8]) -> Result<KeySigner>
             .map(|k| KeySigner::P256(k.into()))
             .or_else(|_| p384::SecretKey::from_sec1_der(&der).map(|k| KeySigner::P384(k.into())))
             .map_err(|_| Error::Sign("unsupported EC private key (only P-256 and P-384)".into())),
-        "RSA PRIVATE KEY" => RsaPrivateKey::from_pkcs1_der(&der)
+        "RSA PRIVATE KEY" => PrivateKey::from_pkcs1_der(&der)
             .map(|k| KeySigner::Rsa(Box::new(k)))
             .map_err(|e| bad(&e)),
         "ENCRYPTED PRIVATE KEY" => Err(Error::Sign(
@@ -239,7 +235,7 @@ fn key_from_pkcs8(der: &[u8]) -> Result<KeySigner> {
     if let Ok(k) = <ed25519_dalek::SigningKey as pkcs8::DecodePrivateKey>::from_pkcs8_der(der) {
         return Ok(KeySigner::Ed25519(k));
     }
-    if let Ok(k) = RsaPrivateKey::from_pkcs8_der(der) {
+    if let Ok(k) = PrivateKey::from_pkcs8_der(der) {
         return Ok(KeySigner::Rsa(Box::new(k)));
     }
     Err(Error::Sign(
@@ -331,7 +327,7 @@ fn parse_public_key_pem(pem_str: &str) -> Result<KeyVerifier> {
     if let Ok(k) = <ed25519_dalek::VerifyingKey as pkcs8::DecodePublicKey>::from_public_key_pem(pem_str) {
         return Ok(KeyVerifier::Ed25519(k));
     }
-    if let Ok(k) = RsaPublicKey::from_public_key_pem(pem_str) {
+    if let Ok(k) = PublicKey::from_public_key_pem(pem_str) {
         return Ok(KeyVerifier::Rsa(Box::new(k)));
     }
     Err(Error::Verify(
@@ -355,6 +351,7 @@ pub fn verify_signature_with_key(public_key: &str, signature: &str, payload: &[u
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use rand_core::OsRng;
 
     // Throwaway ECDSA P-256 key generated with `cosign generate-key-pair`
     // (cosign 3.1.3), password "testing-key". Used only by these tests.
@@ -481,10 +478,10 @@ pub(crate) mod tests {
 
     #[test]
     fn rsa_pkcs1_and_pkcs8() {
-        let key = RsaPrivateKey::new(&mut OsRng, 2048).unwrap();
+        let key = PrivateKey::new(&mut rand::rngs::SysRng, 2048).unwrap();
         let pkcs1 = rsa::pkcs1::EncodeRsaPrivateKey::to_pkcs1_pem(&key, LineEnding::LF).unwrap();
         roundtrip(load_private_key(&pkcs1, no_password()).unwrap(), "RSA-2048");
-        let pkcs8 = pkcs8_010::EncodePrivateKey::to_pkcs8_pem(&key, pkcs8_010::LineEnding::LF).unwrap();
+        let pkcs8 = pkcs8::EncodePrivateKey::to_pkcs8_pem(&key, pkcs8::LineEnding::LF).unwrap();
         roundtrip(load_private_key(&pkcs8, no_password()).unwrap(), "RSA-2048");
     }
 
@@ -604,14 +601,12 @@ pub(crate) mod tests {
     #[test]
     fn malformed_signatures_never_verify() {
         let ed25519 = ed25519_dalek::SigningKey::from_bytes(&[3u8; 32]);
-        let rsa = RsaPrivateKey::new(&mut OsRng, 2048).unwrap();
+        let rsa = PrivateKey::new(&mut rand::rngs::SysRng, 2048).unwrap();
         let pems = [
             COSIGN_PUB.to_string(),
             random_p384().public_key().to_public_key_pem(LineEnding::LF).unwrap(),
             ed25519.verifying_key().to_public_key_pem(LineEnding::LF).unwrap(),
-            rsa.to_public_key()
-                .to_public_key_pem(pkcs8_010::LineEnding::LF)
-                .unwrap(),
+            rsa.to_public_key().to_public_key_pem(pkcs8::LineEnding::LF).unwrap(),
         ];
         for pem in &pems {
             for bad in [&b""[..], &b"short"[..], &[0xff; 64][..], &[0u8; 512][..]] {
