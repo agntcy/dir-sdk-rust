@@ -14,6 +14,7 @@ pub use crate::proto::agntcy::dir::core::v1 as core_v1;
 pub use crate::proto::agntcy::dir::events::v1 as events_v1;
 pub use crate::proto::agntcy::dir::identity::v1 as identity_v1;
 pub use crate::proto::agntcy::dir::routing::v1 as routing_v1;
+pub use crate::proto::agntcy::dir::runtime::v1 as runtime_v1;
 pub use crate::proto::agntcy::dir::search::v1 as search_v1;
 pub use crate::proto::agntcy::dir::sign::v1 as sign_v1;
 pub use crate::proto::agntcy::dir::store::v1 as store_v1;

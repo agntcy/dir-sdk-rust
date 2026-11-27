@@ -19,6 +19,7 @@ snake_case method names.
 | Publication | `create_publication`, `list_publication`, `get_publication` |
 | Identity | `resolve`, `get_verification_info` |
 | Sync | `create_sync`, `list_syncs`, `get_sync`, `delete_sync` |
+| Runtime discovery | `RuntimeService::connect`, `get_workload`, `list_workloads` (separate dir-runtime address) |
 | Events | `listen` (returns a `tonic::Streaming`) |
 | Signing | `sign` (cosign key or keyless Sigstore OIDC), `verify`. Both run natively with no `dirctl` or `cosign` binary, and signatures are compatible with `dirctl`. |
 
@@ -337,6 +338,34 @@ let info = client
 println!("verified: {}", info.verified);
 ```
 
+### Runtime discovery: find running workloads
+
+`RuntimeService` talks to the runtime discovery API (`agntcy.dir.runtime.v1.DiscoveryService`)
+served by [dir-runtime](https://github.com/agntcy/dir-runtime) and `dirctl daemon`. It connects to
+dir-runtime's own address, separately from `Client`, so Directory credentials are never sent to it.
+
+```rust
+use agntcy_dir::client::services::RuntimeService;
+use agntcy_dir::models::runtime_v1::{GetWorkloadRequest, ListWorkloadsRequest};
+
+let runtime = RuntimeService::connect("localhost:8888").await?;
+
+// List workloads, optionally filtered by labels, runtime types and locator protocols
+let workloads = runtime
+    .list_workloads(ListWorkloadsRequest {
+        labels: [("org.agntcy/discover".to_string(), "true".to_string())].into(),
+        runtime_types: vec!["kubernetes".into()],
+        locator_protocols: vec!["tcp".into()],
+        ..Default::default()
+    })
+    .await?;
+
+// Get one workload by hostname or ID
+let workload = runtime
+    .get_workload(GetWorkloadRequest { id: workloads[0].id.clone() })
+    .await?;
+```
+
 ### Events: real-time streaming
 
 `listen` returns the `tonic::Streaming` directly, so you consume events as they arrive:
@@ -438,7 +467,7 @@ let mut store = client.store_service().client();
 ```
 
 Generated models live under `agntcy_dir::models`, for example `core_v1`, `routing_v1`,
-`search_v1`, `sign_v1`, `store_v1`, `events_v1`, and `identity_v1`.
+`search_v1`, `sign_v1`, `store_v1`, `events_v1`, `identity_v1`, and `runtime_v1`.
 
 ## Error handling
 

@@ -35,6 +35,11 @@ pub mod agntcy {
                 package!("agntcy.dir.routing.v1");
             }
         }
+        pub mod runtime {
+            pub mod v1 {
+                package!("agntcy.dir.runtime.v1");
+            }
+        }
         pub mod search {
             pub mod v1 {
                 package!("agntcy.dir.search.v1");
