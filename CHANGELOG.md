@@ -5,6 +5,8 @@
 
 ## Unreleased
 
+## 1.9.2 (2026-11-27)
+
 ### Added
 
 - `RuntimeService` (`agntcy.dir.runtime.v1.DiscoveryService`): `get_workload` and `list_workloads` (with all `ListWorkloadsRequest` filters). It connects to dir-runtime's own address with `RuntimeService::connect`, separately from `Client`, so Directory credentials are never sent to it. Models are in `models::runtime_v1`.

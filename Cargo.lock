@@ -20,7 +20,7 @@ dependencies = [
 
 [[package]]
 name = "agntcy-dir"
-version = "1.8.1"
+version = "1.9.2"
 dependencies = [
  "base64 0.23.1",
  "chrono",
